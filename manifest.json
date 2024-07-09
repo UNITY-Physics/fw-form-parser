@@ -1,0 +1,66 @@
+{
+  "author": "Niall Bourke",
+  "cite": "",
+  "command": "python3 /flywheel/v0/run.py",
+  "config": {},
+  "custom": {
+    "analysis-level": "project",
+    "flywheel": {
+      "classification": {
+        "components": [
+          "tagging"
+        ],
+        "keywords": [
+          "tagging",
+          "QC",
+          "reader"
+        ],
+        "modality": [
+          "MR"
+        ],
+        "type": [
+          "nifti"
+        ]
+      },
+      "suite": "UNITY Apps"
+    },
+    "gear-builder": {
+      "category": "analysis",
+      "image": "flywheel/form-parser:0.1.2"
+    },
+    "kcl-app-binary": "app/main.sh",
+    "kcl-app-modalities": [
+      "anat"
+    ]
+  },
+  "description": "This gear takes the annotations from visual QC and tags the acquisitions",
+  "environment": {
+    "CONDA_DIR": "/opt/conda",
+    "FLYWHEEL": "/flywheel/v0",
+    "GPG_KEY": "E3FF2839C048B25C084DEBE9B26995E310250568",
+    "LANG": "C.UTF-8",
+    "PATH": "/opt/conda/bin:/opt/ants/bin/:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "PYTHON_GET_PIP_SHA256": "fa6f3fb93cce234cd4e8dd2beb54a51ab9c247653b52855a48dd44e6b21ff28b",
+    "PYTHON_GET_PIP_URL": "https://github.com/pypa/get-pip/raw/c20b0cfd643cd4a19246ccf204e2997af70f6b21/public/get-pip.py",
+    "PYTHON_PIP_VERSION": "21.2.3",
+    "PYTHON_VERSION": "3.8.11",
+    "container": "oci",
+    "FSLDIR": "/opt/conda",
+    "FSL_CONDA_CHANNEL": "https://fsl.fmrib.ox.ac.uk/fsldownloads/fslconda/public",
+    "ANTSPATH": "/opt/ants/bin/",
+    "PWD": "/flywheel/v0"
+  },
+  "inputs": {
+    "api-key": {
+      "base": "api-key",
+      "read-only": true
+    }
+  },
+  "label": "form-parser",
+  "license": "MIT",
+  "maintainer": "Niall Bourke <niall.bourke@kcl.ac.uk>",
+  "name": "form-parser",
+  "source": "",
+  "url": "https://github.com/Nialljb/fw-form-parser",
+  "version": "0.1.2"
+}
