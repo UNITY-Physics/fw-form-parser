@@ -1,8 +1,8 @@
 #!/usr/bin/env bash 
 
 GEAR=fw-form-parser
-IMAGE=flywheel/form-parser:0.1.1
-LOG=form-parser-0.1.1-668d5dcc6c219057199ac3ef
+IMAGE=flywheel/form-parser:0.1.2
+LOG=form-parser-0.1.2-6691037d02d8df0cb79aca43
 
 # Command:
 docker run -it --rm --entrypoint bash\

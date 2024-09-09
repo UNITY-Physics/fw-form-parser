@@ -5,7 +5,8 @@ import requests
 import sys
 from flywheel_gear_toolkit import GearToolkitContext
 from app.parser import parse_config
-from app.main import run
+from app.main import run_tagger
+from app.main import run_csv_parser
 
 # Set up logging
 log = logging.getLogger(__name__)
@@ -17,8 +18,12 @@ def main(context: GearToolkitContext) -> None:
         # Get the input files
         api_key = parse_config(context)
         
+        # Run CSV parser
+        e_code = run_csv_parser(context, api_key)
+
         # Run the tagger function
-        e_code = run(context, api_key)
+        e_code = run_tagger(context, api_key)
+
 
     except (TimeoutError, requests.exceptions.ConnectionError) as exc:
         log.error("Timeout error. Try increasing the read_timeout config parameter.")

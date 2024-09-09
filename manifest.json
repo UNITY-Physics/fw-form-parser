@@ -26,7 +26,7 @@
     },
     "gear-builder": {
       "category": "analysis",
-      "image": "flywheel/form-parser:0.1.2"
+      "image": "flywheel/form-parser:0.1.4"
     },
     "kcl-app-binary": "app/main.sh",
     "kcl-app-modalities": [
@@ -61,6 +61,6 @@
   "maintainer": "Niall Bourke <niall.bourke@kcl.ac.uk>",
   "name": "form-parser",
   "source": "",
-  "url": "https://github.com/Nialljb/fw-form-parser",
-  "version": "0.1.2"
+  "url": "https://github.com/nialljb/fw-form-parser",
+  "version": "0.1.4"
 }
