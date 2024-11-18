@@ -251,15 +251,26 @@ def run_csv_parser(context, api_key):
 
     # Function to simplify acquisition labels
     def simplify_label(label):
+        # Initialize empty result
+        result = []
+        
+        # Check for orientation
         if 'AXI' in label.upper():
-            return 'AXI'
+            result.append('AXI')
         elif 'COR' in label.upper():
-            return 'COR'
+            result.append('COR')
         elif 'SAG' in label.upper():
-            return 'SAG'
-        else:
-            return label
-
+            result.append('SAG')
+            
+        # Check for T1/T2
+        if 'T1' in label.upper():
+            result.append('T1')
+        elif 'T2' in label.upper():
+            result.append('T2')
+            
+        # Return combined result or original label if no matches
+        return '_'.join(result) if result else label
+        
     # Apply the function to simplify acquisition labels using .loc
     df.loc[:, 'Acquisition Label'] = df['Acquisition Label'].apply(simplify_label)
 
@@ -324,17 +335,15 @@ def run_csv_parser(context, api_key):
             return 'failed'
 
     # Function is applied here & creates a new column 'QC_all' with the status
-    merged_df['QC_all'] = merged_df.apply(determine_qc_status, axis=1)
 
-    # Move 'QC_all' to just after 'quality_SAG'
-    qc_all_col = merged_df.pop('QC_all')
-    merged_df.insert(merged_df.columns.get_loc('quality_SAG') + 1, 'QC_all', qc_all_col)
-
-    # # Save the final DataFrame to a CSV file
-    # output_file_path = out_dir + '/parsed_qc_data.csv'
-    # merged_df.to_csv(output_file_path, index=False)
-
-
+    try:
+        merged_df['QC_all'] = merged_df.apply(determine_qc_status, axis=1)
+        # Move 'QC_all' to just after 'quality_SAG'
+        qc_all_col = merged_df.pop('QC_all')
+        merged_df.insert(merged_df.columns.get_loc('quality_SAG') + 1, 'QC_all', qc_all_col)
+    except:
+        print('Error applying QC_all function: There may be missing values in the quality columns for AXI, COR, SAG')
+  
     # Get the current date and time
     now = datetime.now()
     formatted_date = now.strftime("%Y-%m-%d_%H-%M-%S")

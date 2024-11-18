@@ -1,4 +1,4 @@
-FROM nialljb/njb-ants-fsl-base:0.0.1 as base
+FROM nialljb/njb-ants-fsl-base:0.0.1 AS base
 
 ENV HOME=/root/
 ENV FLYWHEEL="/flywheel/v0"
