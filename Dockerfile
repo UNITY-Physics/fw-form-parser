@@ -7,17 +7,32 @@ RUN mkdir -p $FLYWHEEL/input
 COPY ./ $FLYWHEEL/
 
 # Dev dependencies (conda, jq, poetry, flywheel installed in base)
+USER root
+
 RUN apt-get update && \
+    apt-get install -y --no-install-recommends gnupg && \
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 8B48AD6246925553 && \
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 7638D0442B90D010 && \
+    apt-get update
+
+
+RUN apt-get update &&  \
+    apt-get install --no-install-recommends -y git && \
     apt-get clean && \
-    pip install flywheel-gear-toolkit && \
-    pip install flywheel-sdk && \
-    pip install nibabel && \
-    pip install pydicom && \
-    pip install matplotlib && \
-    pip install numpy && \
-    pip install typing && \
-    pip install pandas && \
-    pip install fw_client && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+RUN pip3 install flywheel-gear-toolkit && \
+    pip3 install flywheel-sdk && \
+    pip3 install nibabel && \
+    pip3 install pydicom && \
+    pip3 install matplotlib && \
+    pip3 install numpy && \
+    pip3 install typing && \
+    pip3 install pandas && \
+    pip3 install seaborn && \
+    pip3 install fw_client==1.0.0 && \
+    pip3 install reportlab && \
+    pip3 install PyPDF2 && \ 
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Configure entrypoint

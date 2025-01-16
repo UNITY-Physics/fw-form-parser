@@ -3,10 +3,12 @@
 import logging
 import requests
 import sys
+import os
 from flywheel_gear_toolkit import GearToolkitContext
 from app.parser import parse_config
 from app.main import run_tagger
 from app.main import run_csv_parser
+from app.main import generate_qc_report, create_cover_page
 
 # Set up logging
 log = logging.getLogger(__name__)
@@ -19,10 +21,18 @@ def main(context: GearToolkitContext) -> None:
         api_key = parse_config(context)
         
         # Run CSV parser
-        e_code = run_csv_parser(context, api_key)
+        e_code, output = run_csv_parser(context, api_key)
 
         # Run the tagger function
-        e_code = run_tagger(context, api_key)
+        #e_code = run_tagger(context, api_key)
+        ## DELETE BEFORE SUBMITING CODE
+        out_dir = '/flywheel/v0/output'
+        work_dir = '/flywheel/v0/work'
+        #output= "parsed_qc_annotations_2025-01-16_12-22-48.csv"
+        output = os.path.join(out_dir,output)
+        # Run the pdf report function
+        cover = create_cover_page(context, api_key, work_dir)
+        e_code = generate_qc_report(cover,output)
 
 
     except (TimeoutError, requests.exceptions.ConnectionError) as exc:

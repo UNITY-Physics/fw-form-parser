@@ -1,5 +1,5 @@
 {
-  "author": "Niall Bourke",
+  "author": "Niall Bourke, Hajer Karoui",
   "cite": "",
   "command": "python3 /flywheel/v0/run.py",
   "config": {},
@@ -26,14 +26,14 @@
     },
     "gear-builder": {
       "category": "analysis",
-      "image": "flywheel/form-parser:0.1.5"
+      "image": "flywheel/form-parser:0.1.6"
     },
     "kcl-app-binary": "app/main.sh",
     "kcl-app-modalities": [
       "anat"
     ]
   },
-  "description": "This gear takes the annotations from visual QC and tags the acquisitions",
+  "description": "This gear takes the annotations from visual QC and tags the acquisitions, and provides a pdf report about QC",
   "environment": {
     "CONDA_DIR": "/opt/conda",
     "FLYWHEEL": "/flywheel/v0",
@@ -62,5 +62,5 @@
   "name": "form-parser",
   "source": "",
   "url": "https://github.com/nialljb/fw-form-parser",
-  "version": "0.1.5"
+  "version": "0.1.6"
 }
