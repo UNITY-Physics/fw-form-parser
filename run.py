@@ -24,11 +24,9 @@ def main(context: GearToolkitContext) -> None:
         e_code, output = run_csv_parser(context, api_key)
 
         # Run the tagger function
-        #e_code = run_tagger(context, api_key)
-        ## DELETE BEFORE SUBMITING CODE
+        e_code = run_tagger(context, api_key)
         out_dir = '/flywheel/v0/output'
         work_dir = '/flywheel/v0/work'
-        #output= "parsed_qc_annotations_2025-01-16_12-22-48.csv"
         output = os.path.join(out_dir,output)
         # Run the pdf report function
         cover = create_cover_page(context, api_key, work_dir)
