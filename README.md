@@ -54,7 +54,7 @@ MIT License
 
 ### Outputs
 
-No outputs
+PDF report containing plots to visualise QC metrics. 
 
 #### Metadata
 
