@@ -23,6 +23,7 @@ from PIL import Image
 
 
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches 
 import seaborn as sns
 from matplotlib.backends.backend_pdf import PdfPages
 
@@ -341,40 +342,43 @@ def run_csv_parser(context, api_key):
     merged_df.replace(relabel_map, inplace=True)
 
     # Step 8: Check if answers to quality_AXI, quality_COR, quality_SAG are missing, all 'good', or any 'unsure', and set QC_all
-    filters= 'quality_AXI*|quality_SAG*|quality_COR*'
-    df_filtered = merged_df.filter(regex=filters)
-    qc_columns = df_filtered.columns.tolist()
+    contrasts = ["T1","T2"]
+    for contrast in contrasts:
+        filters= f'quality_AXI_{contrast}|quality_SAG_{contrast}|quality_COR_{contrast}'
+        df_filtered = merged_df.filter(regex=filters)
+        qc_columns = df_filtered.columns.tolist()
 
-    # Function is defined here to determine the QC status
-    def determine_qc_status(row):
-        if row[qc_columns].isnull().any():
-            return 'incomplete'
-        elif all(val == 'good' for val in row[qc_columns].fillna('good')):
-            return 'passed'
-        elif any(val == 'unsure' for val in row[qc_columns].fillna('good')) and all(val in ['good', 'unsure'] for val in row[qc_columns].fillna('good')):
-            return 'unsure'
-        else:
-            return 'failed'
+        # Function is defined here to determine the QC status
+        def determine_qc_status(row):
+            if row[qc_columns].isnull().any():
+                return 'incomplete'
+            elif all(val == 'good' for val in row[qc_columns].fillna('good')):
+                return 'passed'
+            elif any(val == 'unsure' for val in row[qc_columns].fillna('good')) and all(val in ['good', 'unsure'] for val in row[qc_columns].fillna('good')):
+                return 'unsure'
+            else:
+                return 'failed'
 
-    # Function is applied here & creates a new column 'QC_all' with the status
+        # Function is applied here & creates a new column 'QC_all' with the status
 
-    try:
-        merged_df['QC_all'] = df_filtered.apply(determine_qc_status, axis=1)
-        # Move 'QC_all' to just after 'quality_SAG'
-        qc_all_col = merged_df.pop('QC_all')
+        try:
+            merged_df[f'QC_all_{contrast}'] = df_filtered.apply(determine_qc_status, axis=1)
+            # Move 'QC_all' to just after 'quality_SAG'
+            qc_all_col = merged_df.pop(f'QC_all_{contrast}')
+            merged_df.insert(merged_df.columns.get_loc(f'quality_SAG_{contrast}') + 1, f'QC_all_{contrast}', qc_all_col)
 
-        regex_pattern = r'quality_SAG.*'
-        matched_columns = [col for col in merged_df.columns if re.match(regex_pattern, col)]
+            # regex_pattern = r'quality_SAG.*'
+            # matched_columns = [col for col in merged_df.columns if re.match(regex_pattern, col)]
 
-        if matched_columns:
-            # Insert QC_all after the first match
-            matched_column = matched_columns[0]
-            col_index = merged_df.columns.get_loc(matched_column)
-            merged_df.insert(col_index + 1, 'QC_all', qc_all_col)
+            # if matched_columns:
+            #     # Insert QC_all after the first match
+            #     matched_column = matched_columns[0]
+            #     col_index = merged_df.columns.get_loc(matched_column)
+            #     merged_df.insert(col_index + 1, f'QC_all_{contrast}', qc_all_col)
 
-            #merged_df.insert(merged_df.columns.get_loc('quality_SAG') + 1, 'QC_all', qc_all_col)
-    except:
-        print('Error applying QC_all function: There may be missing values in the quality columns for AXI, COR, SAG')
+                #merged_df.insert(merged_df.columns.get_loc('quality_SAG') + 1, 'QC_all', qc_all_col)
+        except:
+            print(f'Error applying QC_all_{contrast} function: There may be missing values in the quality columns for AXI, COR, SAG')
   
     # Get the current date and time
     now = datetime.now()
@@ -490,289 +494,353 @@ def generate_qc_report (cover, input) :
     # Define the page size
     page_width, page_height = A4
     a4_fig_size = (page_width, page_height)  # A4 size
-    
-    
-    # ------------------- Plot 1: QC Stacked Barplot ------------------- #
-    fig, ax = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [4, 1]})
     df = pd.read_csv(os.path.join(input))
-    #Columns of interest
-    cols = ["quality_AXI_T2", "quality_COR_T2","quality_SAG_T2"]
-    filters= 'quality_AXI$|quality_SAG$|quality_COR$|QC$'
-    df_filtered = df.filter(regex=filters)
 
-    # Define the categories for each type of column
-    category_mapping = {
-        "quality_AXI_T2": ["good", "unsure", "bad"],
-        "quality_COR_T2": ["good", "unsure", "bad"],
-        "quality_SAG_T2": ["good", "unsure", "bad"]
-        , "QC_all": ["good", "unsure", "failed", "incomplete"]
-    }
+    def qc_barplot(contrast, df):
+        # ------------------- Plot 1: QC Stacked Barplot ------------------- #
+        fig, ax = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [4, 1]})
+        #Columns of interest
+        cols = [f"quality_AXI_{contrast}", f"quality_COR_{contrast}",f"quality_SAG_{contrast}",f"QC_all_{contrast}"]
+        #filters= 'quality_AXI$|quality_SAG$|quality_COR$|QC$'
+        df_filtered = df[[col for col in cols if col in df.columns]]
 
-    color_palette = {
-        'good': '#6D9C77',        # Cool-toned green
-        'unsure': '#E7C069',      # Soft, subtle yellow
-        'bad': '#D96B6B'         # Muted red
-        ,'failed': '#D96B6B',      # Muted red
-        'incomplete': '#6A89CC'   # Muted blue
-    }
+        # print(df_filtered)
 
-    # Example data
-    data = []
+        for col in cols:
+            if col not in df_filtered.columns:
+                df_filtered[col] = None  # Or use np.nan if numeric data is expected
 
-    for col in cols:
-        counts = df[col].value_counts()
-        for category in category_mapping[col]:
-            data.append({
-                "Column": col,
-                "Category": category,
-                "Count": counts.get(category, 0)
-            })
+        cols = df_filtered.columns.tolist()
+        # Define the categories for each type of column
+        category_mapping = {
+            f"quality_AXI_{contrast}": ["good", "unsure", "bad"],
+            f"quality_COR_{contrast}": ["good", "unsure", "bad"],
+            f"quality_SAG_{contrast}": ["good", "unsure", "bad"],
+            f"QC_all_{contrast}": ["passed", "unsure", "failed", "incomplete"]
 
-    # Convert to DataFrame
-    stacked_data = pd.DataFrame(data)
+        }
 
-    # Calculate percentages for each stack
-    stacked_data['Percentage'] = (
-        stacked_data.groupby('Column')['Count'].transform(lambda x: 100 * x / x.sum())
-    )
+        color_palette = {
+            'good': '#6D9C77',        # Cool-toned green
+            'passed': '#6D9C77',      # Cool-toned green
+            'unsure': '#E7C069',      # Soft, subtle yellow
+            'bad': '#D96B6B',         # Muted red
+            'failed': '#D96B6B',      # Muted red
+            'incomplete': '#6A89CC'   # Muted blue
+        }
 
-    # Pivot the data for Seaborn compatibility
-    pivot_data = stacked_data.pivot(index="Column", columns="Category", values="Count").fillna(0)
-    pivot_percentages = stacked_data.pivot(index="Column", columns="Category", values="Percentage").fillna(0)
+        # Example data
+        data = []
 
-    # Prepare for plotting
-    categories = category_mapping[cols[0]]  # Ordered categories
-    pivot_data = pivot_data[categories]
-    pivot_percentages = pivot_percentages[categories]
+        for col in cols:
+            counts = df_filtered[col].value_counts()
+            for category in category_mapping[col]:
+                data.append({
+                    "Column": col,
+                    "Category": category,
+                    "Count": counts.get(category, 0)
+                })
 
-    # Create the stacked bar plot
-    #fig, ax = plt.subplots(figsize=(10, 6))
-    fig, ax = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [4, 1]})
+        print(data)
+        # Convert to DataFrame
+        stacked_data = pd.DataFrame(data)
 
-    bottom = pd.Series([0] * len(pivot_data), index=pivot_data.index)
-
-    for category in categories:
-        sns.barplot(
-            x=pivot_data.index,
-            y=pivot_data[category],
-            ax=ax[0],  # Use the first subplot
-            color=color_palette[category],
-            edgecolor="black",
-            label=category,
-            bottom=bottom,
+        # Calculate percentages for each stack
+        stacked_data['Percentage'] = (
+            stacked_data.groupby('Column')['Count'].transform(lambda x: 100 * x / x.sum())
         )
-        # Add percentages inside the stacks
-        for i, val in enumerate(pivot_data[category]):
-            if val > 0:
-                ax[0].text(
-                    i,
-                    bottom[i] + val / 2,  # Position text in the middle of the stack
-                    f"{pivot_percentages[category][i]:.1f}%",
-                    ha="center",
-                    va="center",
-                    fontsize=10,
-                    color="white",
-                )
-        bottom += pivot_data[category]
 
-    # Configure the main plot
-    ax[0].set_title("Quality Control by Acquisition Type", fontsize=16)
-    ax[0].set_xlabel("Acquisition", fontsize=12)
-    ax[0].set_ylabel("Counts", fontsize=12)
-    ax[0].set_xticks(range(len(pivot_data.index)))
-    ax[0].set_xticklabels(pivot_data.index, fontsize=10)
-    ax[0].legend(title="Category", fontsize=10, title_fontsize=12, loc="upper right")
+        # Pivot the data for Seaborn compatibility
+        pivot_data = stacked_data.pivot(index="Column", columns="Category", values="Count").fillna(0)
+        pivot_percentages = stacked_data.pivot(index="Column", columns="Category", values="Percentage").fillna(0)
 
-    # Add explanation text in the second subplot
-    ax[1].axis('off')  # Turn off axes for the text area
-    ax[1].text(
-        0.5, 0.45,  # Center the text in the subplot
-        f"Number of scans included: {len(df['Subject Label'])}\n"
-        f"Number of unique participants: {df['Subject Label'].nunique()}",
-        ha='center',
-        va='center',
-        fontsize=13,
-        bbox={'facecolor': 'lightgray', 'alpha': 0.5, 'pad': 9}
-    )
+        # Prepare for plotting
+        categories = list(color_palette.keys()) #category_mapping[cols[0]]  # Ordered categories
+        pivot_data = pivot_data[categories]
+        pivot_percentages = pivot_percentages[categories]
 
-    # Adjust layout to ensure proper spacing
-    plt.subplots_adjust(hspace=0.3)  # Adjust spacing between the subplots
-    plt.tight_layout()
-    plt.savefig(os.path.join(work_dir, "QC_stacked_bar.png"))
+        # Create the stacked bar plot
+        #fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [4, 1]})
+        bottom = pd.Series([0] * len(pivot_data), index=pivot_data.index)
 
-    # ------------------- Plot 2: Artifact Failure Barplot ------------------- #
-    fig, ax = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [4, 1]})
+        for category in categories:
+            sns.barplot(
+                x=pivot_data.index,
+                y=pivot_data[category],
+                ax=ax[0],  # Use the first subplot
+                color=color_palette[category],
+                edgecolor="black",
+                label=category,
+                bottom=bottom,
+            )
+            # Add percentages inside the stacks
+            for i, val in enumerate(pivot_data[category]):
+                if val > 0:
+                    ax[0].text(
+                        i,
+                        bottom[i] + val / 2,  # Position text in the middle of the stack
+                        f"{pivot_percentages[category][i]:.1f}%",
+                        ha="center",
+                        va="center",
+                        fontsize=10,
+                        color="white",
+                    )
+            bottom += pivot_data[category]
 
-    artifact_types = ["banding", "contrast", "fov", "motion", "noise", "other", "zipper"]
-    acquisitions = ["AXI","COR","SAG"]
-    
+        # Configure the main plot
+        ax[0].set_title(f"Quality Control by Acquisition Type ({contrast})", fontsize=16)
+        ax[0].set_xlabel("Acquisition", fontsize=12)
+        ax[0].set_ylabel("Counts", fontsize=12)
+        ax[0].set_xticks(range(len(pivot_data.index)))
+        ax[0].set_xticklabels(pivot_data.index, fontsize=10)
+        
+        
+        plt.legend().remove()  # Remove the default legend
 
-    # Filter columns that match the combination of artifact types and acquisitions
-    filtered_columns = [
-        col for col in df.columns
-        if any(artifact in col for artifact in artifact_types) and
-        any(acquisition in col for acquisition in acquisitions)
-    ]
+        custom_legend_mapping = {
+        'Good/Passed': '#6D9C77',  # Shared color for 'good' and 'passed'
+        'Unsure': '#E7C069',       # Color for 'unsure'
+        'Bad/Failed': '#D96B6B',   # Shared color for 'bad' and 'failed'
+        'Incomplete': '#6A89CC'    # Color for 'incomplete'
+    }
 
-    # Create a new DataFrame with only the filtered columns
-    filtered_df = df[filtered_columns]
+        # Create a custom legend
+        custom_handles = [
+            mpatches.Patch(color=color, label=label)
+            for label, color in custom_legend_mapping.items()
+        ]
+        ax[0].legend(
+            handles=custom_handles,
+            title='Category',
+            bbox_to_anchor=(1.05, 1), 
+            loc='upper left'
+        )
+
+        # Add explanation text in the second subplot
+        ax[1].axis('off')  # Turn off axes for the text area
+        ax[1].text(
+            0.5, 0.45,  # Center the text in the subplot
+            f"Number of scans included: {len(df['Subject Label'])}\n"
+            f"Number of unique participants: {df['Subject Label'].nunique()}",
+            ha='center',
+            va='center',
+            fontsize=13,
+            bbox={'facecolor': 'lightgray', 'alpha': 0.5, 'pad': 9}
+        )
+
+        # Adjust layout to ensure proper spacing
+        plt.subplots_adjust(hspace=0.3)  # Adjust spacing between the subplots
+        plt.tight_layout()
+        plt.savefig(os.path.join(work_dir, f"QC_stacked_bar_{contrast}.png"))
+
+        # ------------------- Plot 2: Artifact Failure Barplot ------------------- #
+        fig, ax = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [4, 1]})
+
+        artifact_types = ["banding", "contrast", "fov", "motion", "noise", "other", "zipper"]
+        acquisitions = ["AXI","COR","SAG"]
+        
+
+        # Filter columns that match the combination of artifact types and acquisitions
+        filtered_columns = [
+            col for col in df.columns
+            if any(artifact in col for artifact in artifact_types) and
+            any(acquisition in col for acquisition in acquisitions) and
+            (contrast in col)
+        ]
+
+        # Create a new DataFrame with only the filtered columns
+        filtered_df = df[filtered_columns]
 
 
-    failure_data = []
-    for artifact in artifact_types:
-        artifact_cols = [col for col in df.columns if artifact in col]
-        artifact_failures = df[artifact_cols].apply(lambda x: x == 'bad').sum().sum()
-        total_scans = len(filtered_df)  # Total number of scans
-        failure_rate = (artifact_failures / total_scans) * 100
-        failure_data.append({"Artifact": artifact, "Failure Rate (%)": failure_rate})
+        failure_data = []
+        for artifact in artifact_types:
+            artifact_cols = [col for col in df.columns if artifact in col]
+            artifact_failures = df[artifact_cols].apply(lambda x: x == 'bad').sum().sum()
+            total_scans = len(filtered_df)  # Total number of scans
+            failure_rate = (artifact_failures / total_scans) * 100
+            failure_data.append({"Artifact": artifact, "Failure Rate (%)": failure_rate})
 
-    # Convert to DataFrame
-    failure_df = pd.DataFrame(failure_data)
-    failure_df.to_csv(os.path.join(work_dir,"failures_df.csv"))
+        # Convert to DataFrame
+        failure_df = pd.DataFrame(failure_data)
+        failure_df.to_csv(os.path.join(work_dir,f"failures_df_{contrast}.csv"))
 
-    # Plot as a bar chart
-    
-    sns.barplot(data=failure_df, x="Artifact", y="Failure Rate (%)",ax=ax[0],  palette="coolwarm")
-    ax[0].set_title("Failure Rates by Artifact Type", fontsize=16)
-    ax[0].set_xlabel("Artifact Type", fontsize=12)
-    ax[0].set_ylabel("Failure Rate (%)", fontsize=12)
-    # ax[0].set_xticklabels(rotation=45, fontsize=10,)
+        # Plot as a bar chart
+        
+        sns.barplot(data=failure_df, x="Artifact", y="Failure Rate (%)",ax=ax[0],  palette="coolwarm")
+        ax[0].set_title(f"Failure Rates by Artifact Type {contrast}", fontsize=16)
+        ax[0].set_xlabel("Artifact Type", fontsize=12)
+        ax[0].set_ylabel("Failure Rate (%)", fontsize=12)
+        # ax[0].set_xticklabels(rotation=45, fontsize=10,)
 
-    ax[1].axis('off')  # Turn off axes for the text area
-    ax[1].text(
-        0.5, 0.45,  # Center the text in the subplot
-        f"Number of failed scans: {len(failure_df)}/{len(df)}",
-        ha='center',
-        va='center',
-        fontsize=13,
-        bbox={'facecolor': 'lightgray', 'alpha': 0.5, 'pad': 9}
-    )
+        ax[1].axis('off')  # Turn off axes for the text area
+        ax[1].text(
+            0.5, 0.45,  # Center the text in the subplot
+            f"Number of failed scans: {len(failure_df)}/{len(df)}",
+            ha='center',
+            va='center',
+            fontsize=13,
+            bbox={'facecolor': 'lightgray', 'alpha': 0.5, 'pad': 9}
+        )
 
-    # Adjust layout to ensure proper spacing
-    plt.subplots_adjust(hspace=0.3)  # Adjust spacing between the subplots
-    plt.tight_layout()
-    plt.savefig(os.path.join(work_dir, "failure_artifacts.png"))
-    plt.close()
+        # Adjust layout to ensure proper spacing
+        plt.subplots_adjust(hspace=0.3)  # Adjust spacing between the subplots
+        plt.tight_layout()
+        plt.savefig(os.path.join(work_dir, f"failure_artifacts_{contrast}.png"))
+        plt.close()
 
     # ####### Failures over time ########
 
-    ## Preprocess the session_date to replace underscores with colons
-    df['session_date'] = pd.to_datetime(df['Session Label'].str.split(' ').str[0], errors='coerce')
+    def plot_failures_over_time(contrast, df):
 
-    #Check for any parsing issues
-    if df['session_date'].isnull().any():
-        print("Warning: Some dates could not be parsed.")
+        # Plotting setup
+        fig2 = plt.figure(figsize=(10, 8))
+        ax2 = fig2.add_axes([0.125, 0.5, 0.8, 0.4])  # Position and size of the plot within the A4 page
 
-    # Extract month and year for monthly grouping
-    df['month'] = df['session_date'].dt.to_period('M')
 
-    # Count total entries and failures by month
-    total_per_day = df.groupby('session_date').size()
-    failures = df[df['QC_all'] == 'failed'].groupby('session_date').size()
+        try : 
 
-    # Calculate percentage of failures
-    failure_percentage = (failures / total_per_day) * 100
+            x_axis_threshold = 30  # Max number of x-axis points for readability
 
-    # Plotting setup
-    fig2 = plt.figure(figsize=(10,8))
-    ax2 = fig2.add_axes([0.125, 0.5, 0.8, 0.4])  # Position and size of the plot within the A4 page
+            ## Preprocess the session_date to replace underscores with colons
+            df['session_date'] = pd.to_datetime(df['Session Label'].str.split(' ').str[0], errors='coerce')
+            #Check for any parsing issues
+            if df['session_date'].isnull().any():
+                print("Warning: Some dates could not be parsed.")
 
-    # Use seaborn's lineplot on ax
-    sns.lineplot(
-        x=failure_percentage.index.astype(str), 
-        y=failure_percentage.values, 
-        marker='o', linestyle='-', color='#D96B6B', ax=ax2
-    )
+            # Count unique dates
+            unique_dates = df['session_date'].nunique()
+            df['month'] = df['session_date'].dt.to_period('M')
+            failures = df[df[f'QC_all_{contrast}'] == 'failed']
 
-    # Set title and labels directly on ax
-    ax2.set_title('Percentage of QC_all Failures per day')
-    ax2.set_xlabel('Day')
-    ax2.set_ylabel('Percentage of Failures (%)')
-    ax2.tick_params(axis='x', rotation=45)  # Rotate x-axis labels for readability
-    ax2.grid(True)
+            # Decide aggregation level
+            if unique_dates > x_axis_threshold:
+                # Aggregate by month
+                
+                total_counts = df.groupby('month').size()  # Total entries per month
+                failure_counts = failures.groupby('month').size()  # Failures per month
+                x = total_counts.index.astype(str)  # Convert to string for plotting
+                y = (failure_counts / total_counts * 100).fillna(0)  # Percentage of failures
+                x_label = 'Month'
+            else:
+                # Aggregate by day
+                total_counts = df.groupby('session_date').size()  # Total entries per day
+                failure_counts = failures.groupby('session_date').size()  # Failures per day
+                x = total_counts.index  # Dates for plotting
+                y = (failure_counts / total_counts * 100).fillna(0)  # Percentage of failures
+                x_label = 'Day'
 
+            
+            # Use seaborn's lineplot on ax
+            sns.lineplot(
+                x=x, 
+                y=y, 
+                marker='o', linestyle='-', color='#D96B6B', ax=ax2
+            )
+
+            # Set title and labels directly on ax
+            ax2.set_title(f'Percentage of QC Failures per {x_label.lower()}', fontsize=14)
+            ax2.set_xlabel(x_label, fontsize=12)
+            ax2.set_ylabel('Percentage of Failures (%)', fontsize=12)
+            ax2.tick_params(axis='x', rotation=45)  # Rotate x-axis labels for readability
+            ax2.grid(True)
+
+            # Add explanation text just below the plot within the figure
+            plt.figtext(0.20, 0.25,  # Position relative to the figure (0.42 keeps it below ax)
+                "This line chart illustrates the failure rate for quality control (QC) across sessions,\n"
+                f"shown as a percentage of total acquisitions for each {x_label.lower()}."
+                f"\n\nAverage number of scans per {x_label.lower()}: {int(total_counts.mean())}",
+
+                # f"Number of failed scans: {len(failures)} /{len(df)}",
+                wrap=True, horizontalalignment='left', fontsize=12,
+                bbox={'facecolor': 'lightgray', 'alpha': 0.5, 'pad': 10}
+                )
+            
+        except Exception as e:
+            print(e)
+
+            # Add explanation text just below the plot within the figure
+            plt.figtext(0.20, 0.25,  # Position relative to the figure (0.42 keeps it below ax)
+                f"Error generating graph due to: {e}.\n",
+                wrap=True, horizontalalignment='left', fontsize=12,
+                bbox={'facecolor': 'lightgray', 'alpha': 0.5, 'pad': 10}
+                )
+
+        # Adjust layout for better spacing
+        plt.tight_layout()   
+        plot_path = os.path.join(work_dir,f"failure_percentage_over_time_{contrast}.png")
+        plt.savefig(plot_path)  # Save the plot as an image
     
-    # Add explanation text just below the plot within the figure
-    plt.figtext(0.20, 0.25,  # Position relative to the figure (0.42 keeps it below ax)
-        "This line chart illustrates the failure rate for quality control (QC) across sessions,\n"
-        "shown as a percentage of total acquisitions for each day.\n"
-        f"Numbre of failed scans: {failures.sum()} /{len(df)}",
-        wrap=True, horizontalalignment='left', fontsize=12,
-        bbox={'facecolor': 'lightgray', 'alpha': 0.5, 'pad': 10}
-        )
     
-    # Adjust layout to ensure proper spacing
-    plt.subplots_adjust(hspace=0.3)  # Adjust spacing between the subplots
-    plt.tight_layout()  # Adjust layout to make room for rotated labels   
-    plot_path = os.path.join(work_dir,"failure_percentage_over_time.png")
-    plt.savefig(plot_path)  # Save the plot as an image
-    
-    #pdf.showPage() #new page        
+    contrasts = ["T1","T2"]
+    for contrast in contrasts:
+        try:
+            data = df.filter(regex=f'Subject Label|Session Label|{contrast}')
+            #if the contrast is found, i.e. there are more than 2 columns in the dataframe
+            if len(data.columns.tolist()) > 2:
+                qc_barplot(contrast,data)
+                plot_failures_over_time(contrast,df)
 
-    # Position line chart image below the grid of pie charts
-    #pdf.drawImage(plot_path,  70, -20, width= 400, preserveAspectRatio=True)
+                # ------------------- Add Plots to PDF ------------------- #
+                # Positioning variables
+                plot_width = 270
 
+                # Load the first image (Plot 1)
+                image1_path = os.path.join(work_dir, f"QC_stacked_bar_{contrast}.png")
+                image1 = Image.open(image1_path)
+                image1_width, image1_height = image1.size
 
+                # Load the second image (Plot 2)
+                image2_path = os.path.join(work_dir, f"failure_artifacts_{contrast}.png")
+                image2 = Image.open(image2_path)
+                image2_width, image2_height = image2.size
 
-    # ------------------- Add Plots to PDF ------------------- #
-    # Positioning variables
-    plot_width = 270
+                # Load the third image (Plot 3)
+                image3_path = os.path.join(work_dir, f"failure_percentage_over_time_{contrast}.png")
+                image3 = Image.open(image3_path)
+                image3_width, image3_height = image3.size
 
-    # Load the first image (Plot 1)
-    image1_path = os.path.join(work_dir, "QC_stacked_bar.png")
-    image1 = Image.open(image1_path)
-    image1_width, image1_height = image1.size
+                # Calculate the scaled dimensions
+                scale1 = plot_width / image1_width
+                scaled_height1 = image1_height * scale1
 
-    # Load the second image (Plot 2)
-    image2_path = os.path.join(work_dir, "failure_artifacts.png")
-    image2 = Image.open(image2_path)
-    image2_width, image2_height = image2.size
+                scale2 = plot_width / image2_width
+                scaled_height2 = image2_height * scale2
 
-    # Load the third image (Plot 3)
-    image3_path = os.path.join(work_dir, "failure_percentage_over_time.png")
-    image3 = Image.open(image3_path)
-    image3_width, image3_height = image3.size
+                scale3 = 400 / image3_width
+                scaled_height3 = image3_height * scale3
 
-    # Calculate the scaled dimensions
-    scale1 = plot_width / image1_width
-    scaled_height1 = image1_height * scale1
+                # Positioning variables
+                padding = 10  # Space between plots
 
-    scale2 = plot_width / image2_width
-    scaled_height2 = image2_height * scale2
-
-    scale3 = 400 / image3_width
-    scaled_height3 = image3_height * scale3
-
-    # Positioning variables
-    padding = 10  # Space between plots
-
-    pdf.setFont("Helvetica", 12)
-    pdf.drawString(50, page_height - 100, "Key Highlights:")
-    pdf.drawString(70, page_height - 120, "- Plot 1: Distribution of QC outcomes across all datasets.")
-    pdf.drawString(70, page_height - 140, "- Plot 2: Most frequent artifacts causing failures.")
-    pdf.drawString(70, page_height - 160, "- Plot 3: Trends in failure rates over time.")
+                pdf.setFont("Helvetica", 12)
+                pdf.drawString(50, page_height - 80, f"{contrast} acquisition plots:")
+                pdf.drawString(70, page_height - 100, "- Plot 1: Distribution of QC outcomes across all datasets.")
+                pdf.drawString(70, page_height - 120, "- Plot 2: Most frequent artifacts causing failures.")
+                pdf.drawString(70, page_height - 140, "- Plot 3: Trends in failure rates over time.")
 
 
-    # Plot 1 position (left, top row)
-    plot1_x = (page_width / 2) - plot_width - (padding / 2)  # Left side
-    plot1_y = page_height - max(scaled_height1, scaled_height2) - padding - 100 - 130
-    pdf.drawImage(image1_path, plot1_x, plot1_y, width=plot_width, height=scaled_height1)
+                # Plot 1 position (left, top row)
+                plot1_x = (page_width / 2) - plot_width - (padding / 2)  # Left side
+                plot1_y = page_height - max(scaled_height1, scaled_height2) - padding - 100 - 130
+                pdf.drawImage(image1_path, plot1_x, plot1_y, width=plot_width, height=scaled_height1)
 
-    # Plot 2 position (right, top row)
-    plot2_x = (page_width / 2) + (padding / 2)  # Right side
-    plot2_y = plot1_y # Same vertical position as Plot 1
-    pdf.drawImage(image2_path, plot2_x, plot2_y, width=plot_width, height=scaled_height2)
+                # Plot 2 position (right, top row)
+                plot2_x = (page_width / 2) + (padding / 2)  # Right side
+                plot2_y = plot1_y # Same vertical position as Plot 1
+                pdf.drawImage(image2_path, plot2_x, plot2_y, width=plot_width, height=scaled_height2)
 
-    # Plot 3 position (centered below Plots 1 and 2)
-    plot3_x = ((page_width - plot_width) / 2 ) - 60 # Centered horizontally
-    plot3_y = plot1_y - scaled_height3 - padding
-    pdf.drawImage(image3_path, plot3_x, plot3_y, width=400, height=scaled_height3)
-
-
+                # Plot 3 position (centered below Plots 1 and 2)
+                plot3_x = ((page_width - plot_width) / 2 ) - 60 # Centered horizontally
+                plot3_y = plot1_y - scaled_height3 - padding
+                pdf.drawImage(image3_path, plot3_x, plot3_y, width=400, height=scaled_height3)
+                pdf.showPage()  # Finalize the current page
+        except Exception as e:
+            print(f'Unable to run this on contrast {contrast} ', e)
 
 
     try:
-        pdf.showPage()  # Finalize the current page
+        #pdf.showPage()  # Finalize the current page
         pdf.save()
 
         merger = PdfMerger()
