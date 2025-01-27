@@ -16,7 +16,9 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.pdfgen import canvas
-from reportlab.platypus import Paragraph, Frame
+from reportlab.platypus import Paragraph, Frame,SimpleDocTemplate
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.enums import TA_JUSTIFY
 from reportlab.lib.utils import ImageReader
 from PyPDF2 import PdfMerger
 from PIL import Image
@@ -27,6 +29,8 @@ import matplotlib.patches as mpatches
 import seaborn as sns
 from matplotlib.backends.backend_pdf import PdfPages
 
+from utils.format import beautify_report, scale_image, simplify_label
+
 """
 Tag files for visual QC reader tasks in Flywheel
 See README.md for usage & license
@@ -34,9 +38,33 @@ See README.md for usage & license
 Author: Niall Bourke & Hajer Karoui
 """
 
+
 log = logging.getLogger(__name__)
 work_dir = Path('/flywheel/v0/work', platform='auto')
 out_dir = Path('/flywheel/v0/output', platform='auto')
+
+
+# Styles
+styles = getSampleStyleSheet()
+styleN = styles['Normal']
+styleN.alignment = TA_JUSTIFY
+styleN.fontSize = 12  # override fontsize because default stylesheet is too small
+styleN.leading = 15
+# Add left and right indentation
+styleN.leftIndent = 20  # Set left indentation
+styleN.rightIndent = 20  # Set right indentation
+
+
+# Create a custom style
+custom_style = ParagraphStyle(name="CustomStyle", parent=styleN,
+                            fontSize=12,
+                            leading=15,
+                            alignment=0,  # Centered
+                            leftIndent=20,
+                            rightIndent=20,
+                            spaceBefore=10,
+                            spaceAfter=10)
+
 
 def run_tagger(context, api_key):
 
@@ -269,28 +297,6 @@ def run_csv_parser(context, api_key):
     # Step 3: Save the filtered DataFrame to a new CSV (optional)
     df.to_csv('/flywheel/v0/work/filtered_file.csv', index=False)
 
-
-    # Function to simplify acquisition labels
-    def simplify_label(label):
-        # Initialize empty result
-        result = []
-        
-        # Check for orientation
-        if 'AXI' in label.upper():
-            result.append('AXI')
-        elif 'COR' in label.upper():
-            result.append('COR')
-        elif 'SAG' in label.upper():
-            result.append('SAG')
-            
-        # Check for T1/T2
-        if 'T1' in label.upper():
-            result.append('T1')
-        elif 'T2' in label.upper():
-            result.append('T2')
-            
-        # Return combined result or original label if no matches
-        return '_'.join(result) if result else label
         
     # Apply the function to simplify acquisition labels using .loc
     df.loc[:, 'Acquisition Label'] = df['Acquisition Label'].apply(simplify_label)
@@ -365,7 +371,7 @@ def run_csv_parser(context, api_key):
             merged_df[f'QC_all_{contrast}'] = df_filtered.apply(determine_qc_status, axis=1)
             # Move 'QC_all' to just after 'quality_SAG'
             qc_all_col = merged_df.pop(f'QC_all_{contrast}')
-            merged_df.insert(merged_df.columns.get_loc(f'quality_SAG_{contrast}') + 1, f'QC_all_{contrast}', qc_all_col)
+            merged_df.insert(merged_df.columns.get_loc(f'quality_AXI_{contrast}') - 1, f'QC_all_{contrast}', qc_all_col)
 
             # regex_pattern = r'quality_SAG.*'
             # matched_columns = [col for col in merged_df.columns if re.match(regex_pattern, col)]
@@ -394,10 +400,11 @@ def run_csv_parser(context, api_key):
 
 # 1. Generate Cover Page
 def create_cover_page(context, api_key, output_dir):
+    
+    page_width, page_height = A4
 
     fw = flywheel.Client(api_key=api_key)
-    user = fw.get_current_user().id
-
+    user = f"{fw.get_current_user().firstname} {fw.get_current_user().lastname} [{fw.get_current_user().email}]"
 
     # Get the destination container and project ID
     destination_container = context.client.get_analysis(context.destination["id"])
@@ -407,11 +414,14 @@ def create_cover_page(context, api_key, output_dir):
     destination_container = context.client.get_analysis(context.destination["id"])
     dest_proj_id = destination_container.parents["project"]
     project_label = project_container.label
+    project_description = project_container.description
+
     print(f"Project Label: {project_label}")
 
 
     filename = 'cover_page'
     cover = os.path.join(output_dir, f"{filename}.pdf")
+    logo_path = "/flywheel/v0/utils/logo.jpg"
 
     # Ensure the directory exists
     if not os.path.exists(output_dir):
@@ -420,26 +430,22 @@ def create_cover_page(context, api_key, output_dir):
     # Create a new PDF canvas
     pdf = canvas.Canvas(os.path.join(output_dir, f"{filename}.pdf"), pagesize=A4)
 
+    pdf = beautify_report(pdf)
+
     # Title
     pdf.setFont("Helvetica-Bold", 16)
+    pdf.setFillColorRGB(31/255, 78/255, 121/255)    
     pdf.drawCentredString(10.5 * cm, 27 * cm, "QC Report")
 
-    # Sub-title : volumetric output
+    # Sub-title 
     pdf.setFont("Helvetica", 14)
+    pdf.setFillColorRGB(110/255, 110/255, 110/255)
     pdf.drawCentredString(10.5 * cm, 25.5 * cm, project_label)
 
     # Sub-title
     pdf.setFont("Helvetica", size=14)    
 
-    # Styles
-    styles = getSampleStyleSheet()
-    styleN = styles['Normal']
-    styleN.fontSize = 12  # override fontsize because default stylesheet is too small
-    styleN.leading = 15
-    # Add left and right indentation
-    styleN.leftIndent = 20  # Set left indentation
-    styleN.rightIndent = 20  # Set right indentation
-
+    
     # Create a custom style
     custom_style = ParagraphStyle(name="CustomStyle", parent=styleN,
                               fontSize=12,
@@ -454,7 +460,7 @@ def create_cover_page(context, api_key, output_dir):
     # Main text (equivalent to `multi_cell` in FPDF)
     text = ("This report provides a QC summary detailing scan quality across acquisitions, types of artefacts and the failure rates across time.\n"
             "The plots were generated using the output of the QC annotations."
-         )
+            f"<br/><br/><b>Project Description</b>: {project_description}")
 
     # Create a paragraph for text wrapping
     main_paragraph = Paragraph(text, custom_style)
@@ -467,7 +473,8 @@ def create_cover_page(context, api_key, output_dir):
 
 
     # Timestamp and User Details
-    pdf.setFont("Helvetica", 12)
+    pdf.setFont("Helvetica", 9)
+    pdf.setFillColorRGB(79/255, 79/255, 79/255)
     pdf.drawString(2 * cm, 2 * cm, "Generated By:")
     pdf.drawString(2 * cm, 1.5 * cm, f"{user}")
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -490,11 +497,126 @@ def generate_qc_report (cover, input) :
 
     report = os.path.join(work_dir, "qc_report.pdf")  # Ensure correct path and filename
     pdf = canvas.Canvas(report)
-    
+    pdf = beautify_report(pdf,False,True)
+
     # Define the page size
     page_width, page_height = A4
     a4_fig_size = (page_width, page_height)  # A4 size
     df = pd.read_csv(os.path.join(input))
+
+    def acquisition_trends ():
+
+        #Use QC_all_{contrast} to get number of session?  
+        df = pd.read_csv('/flywheel/v0/work/filtered_file.csv')
+
+        ## Preprocess the session_date to replace underscores with colons
+        df['session_date'] = pd.to_datetime(df['Session Label'].str.split(' ').str[0], errors='coerce')
+
+        #Simplify acquisition label for counts
+        df.loc[:, 'Acquisition Label'] = df['Acquisition Label'].apply(simplify_label)
+
+        #Check for any parsing issues
+        if df['session_date'].isnull().any():
+            print("Warning: Some dates could not be parsed.")
+
+        # Count unique dates
+        df['month'] = df['session_date'].dt.to_period('M')
+        total_counts = df.groupby(['Project Label','month']).size()
+
+        total_counts = total_counts.reset_index()
+        total_counts.columns = ['Project Label','month','Values']
+
+        #########################
+        # Group by 'Project Label'
+        project_stats = df.groupby('Project Label').apply(
+            lambda group: pd.Series({
+                'Unique Subjects': int(group['Subject Label'].nunique()),
+                'Mean Acquisitions per Session': int(group.groupby('Session Label')['Acquisition Label'].count().mean()),
+                'Mean Sessions per Subject': int(group.groupby('Subject Label')['Session Label'].nunique().mean())
+            })
+        ).reset_index()
+
+        #------------ Plotting --------
+
+        fig2 = plt.figure(figsize=(11.7, 8.3))
+        ax2 = fig2.add_axes([0.125, 0.5, 0.8, 0.4]) 
+
+        # Use seaborn's lineplot on ax
+        sns.lineplot(
+            x=total_counts['month'].astype(str),y='Values',
+            data = total_counts,
+            marker='o', linestyle='-', color='green', ax=ax2, hue='Project Label',palette='Set2'
+        )
+
+        # Set title and labels directly on ax
+        ax2.set_title(f'Number of acquisitions per month', fontsize=14)
+        ax2.set_xlabel("Month", fontsize=12)
+        ax2.set_ylabel('Acquisition Count', fontsize=12)
+        ax2.tick_params(axis='x', rotation=45) 
+        ax2.grid(True)
+
+        grouped_averages = total_counts.groupby('Project Label')['Values'].mean().astype(int)
+        average_text = grouped_averages.to_string(index=True, header=False)  # Show only index and values
+
+        plt.figtext(0.25, 0.25, 
+            f"Average number of scans per month per project:\n\n{average_text}",
+
+            # f"Number of failed scans: {len(failures)} /{len(df)}",
+            wrap=True, horizontalalignment='left', fontsize=12,
+            bbox={'facecolor': 'lightgray', 'alpha': 0.5, 'pad': 9}
+            )
+
+        plt.tight_layout()
+        plot_path = os.path.join(work_dir, f"acq_over_time.png")
+        plt.savefig(plot_path,dpi=200)  # Save the plot as an image
+        plt.close()
+
+
+        #################
+         # Create figure
+        fig = plt.figure(figsize=(11.7, 5))  
+        ax = fig.add_axes([0.05, 0.2, 0.9, 0.6])
+
+        # Add Title
+        # plt.text(0.5, 0.95, 'Summary Descriptive Statistics', fontsize=14, ha='center', transform=fig.transFigure)
+
+        # Turn off axes
+        ax.axis('tight')
+        ax.axis('off')
+
+        # Create table
+        table = ax.table(
+            cellText=project_stats.values,
+            colLabels=project_stats.columns,
+            cellLoc='center',
+            loc='center'
+        )
+
+
+        # Customize table appearance
+        table.auto_set_font_size(False)
+        table.set_fontsize(10)
+        table.scale(1, 2)  # Adjust scaling (wider and taller)
+        # ax.set_title('Quantitative Summary of Site Data')
+
+
+        # Add some styling
+        for key, cell in table.get_celld().items():
+            if key[0] == 0:  # Header row
+                cell.set_text_props(weight='bold', color='white')
+                cell.set_facecolor('#40466e')  # Dark header background
+            else:
+                cell.set_facecolor('#f0f0f0')  # Light gray background for data rows
+
+        # Adjust layout to ensure no overlap
+        plt.subplots_adjust(top=0.85, bottom=0.8)  # Adjust to fit title and text properly
+        table_path = os.path.join(work_dir,"quantitative_summary.png")
+        plt.tight_layout()
+        plt.savefig(table_path,dpi=200,bbox_inches='tight')
+
+
+        return plot_path, table_path
+        
 
     def qc_barplot(contrast, df):
         # ------------------- Plot 1: QC Stacked Barplot ------------------- #
@@ -506,9 +628,9 @@ def generate_qc_report (cover, input) :
 
         # print(df_filtered)
 
-        for col in cols:
-            if col not in df_filtered.columns:
-                df_filtered[col] = None  # Or use np.nan if numeric data is expected
+        # for col in cols:
+        #     if col not in df_filtered.columns:
+        #         df_filtered[col] = None  # Or use np.nan if numeric data is expected
 
         cols = df_filtered.columns.tolist()
         # Define the categories for each type of column
@@ -532,7 +654,7 @@ def generate_qc_report (cover, input) :
         # Example data
         data = []
 
-        for col in cols:
+        for col in df_filtered.columns:
             counts = df_filtered[col].value_counts()
             for category in category_mapping[col]:
                 data.append({
@@ -541,7 +663,6 @@ def generate_qc_report (cover, input) :
                     "Count": counts.get(category, 0)
                 })
 
-        print(data)
         # Convert to DataFrame
         stacked_data = pd.DataFrame(data)
 
@@ -593,7 +714,7 @@ def generate_qc_report (cover, input) :
         ax[0].set_xlabel("Acquisition", fontsize=12)
         ax[0].set_ylabel("Counts", fontsize=12)
         ax[0].set_xticks(range(len(pivot_data.index)))
-        ax[0].set_xticklabels(pivot_data.index, fontsize=10)
+        ax[0].set_xticklabels(pivot_data.index.str.replace('_',' '), fontsize=10)
         
         
         plt.legend().remove()  # Remove the default legend
@@ -632,7 +753,7 @@ def generate_qc_report (cover, input) :
         # Adjust layout to ensure proper spacing
         plt.subplots_adjust(hspace=0.3)  # Adjust spacing between the subplots
         plt.tight_layout()
-        plt.savefig(os.path.join(work_dir, f"QC_stacked_bar_{contrast}.png"))
+        plt.savefig(os.path.join(work_dir, f"QC_stacked_bar_{contrast}.png"),dpi=200)
 
         # ------------------- Plot 2: Artifact Failure Barplot ------------------- #
         fig, ax = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [4, 1]})
@@ -668,10 +789,10 @@ def generate_qc_report (cover, input) :
         # Plot as a bar chart
         
         sns.barplot(data=failure_df, x="Artifact", y="Failure Rate (%)",ax=ax[0],  palette="coolwarm")
-        ax[0].set_title(f"Failure Rates by Artifact Type {contrast}", fontsize=16)
+        ax[0].set_title(f"Failure Rates by Artifact Type ({contrast})", fontsize=16)
         ax[0].set_xlabel("Artifact Type", fontsize=12)
         ax[0].set_ylabel("Failure Rate (%)", fontsize=12)
-        # ax[0].set_xticklabels(rotation=45, fontsize=10,)
+        ax[0].set_xticklabels(failure_df.Artifact.str.title())
 
         ax[1].axis('off')  # Turn off axes for the text area
         ax[1].text(
@@ -686,7 +807,7 @@ def generate_qc_report (cover, input) :
         # Adjust layout to ensure proper spacing
         plt.subplots_adjust(hspace=0.3)  # Adjust spacing between the subplots
         plt.tight_layout()
-        plt.savefig(os.path.join(work_dir, f"failure_artifacts_{contrast}.png"))
+        plt.savefig(os.path.join(work_dir, f"failure_artifacts_{contrast}.png"),dpi=200)
         plt.close()
 
     # ####### Failures over time ########
@@ -769,10 +890,59 @@ def generate_qc_report (cover, input) :
         # Adjust layout for better spacing
         plt.tight_layout()   
         plot_path = os.path.join(work_dir,f"failure_percentage_over_time_{contrast}.png")
-        plt.savefig(plot_path)  # Save the plot as an image
+        plt.savefig(plot_path,dpi=200)  # Save the plot as an image
+    
     
     
     contrasts = ["T1","T2"]
+    max_width = 300  # Maximum width in points
+    max_height = page_width / 3  # Maximum height in points
+    padding = 10  # Space between plots
+
+
+    #plot acquisition trends
+    image1_path, image2_path = acquisition_trends()
+
+    # Center the image
+    # Positioning variables (adjust as needed)
+    scaled_width1, scaled_height1 = scale_image(image1_path, 400, 400)
+    scaled_width2, scaled_height2 = scale_image(image2_path, 400, 400)
+
+    plot1_x = (page_width - scaled_width1) / 2  # Centered horizontally
+    plot1_y = page_height - scaled_height1 - padding - 200
+
+    plot2_x = (page_width - scaled_width2) / 2  # Centered horizontally
+    plot2_y = page_height - scaled_height2 - plot1_y - padding - 100
+        
+        
+    pdf.setFont("Helvetica", 12)
+    pdf.setFillColorRGB(0, 0, 0)
+
+    text = (
+    "<b>Quantitative summary of site data</b> <br/><br/>This chart summarizes the monthly acquisition trends across different projects, providing a clear view of how imaging sessions are distributed over time."
+    "<br/>Data are grouped by project, highlighting variations in activity levels, helping to identify patterns and periods of higher engagement."
+    )
+
+    custom_style = ParagraphStyle(name="CustomStyle", parent=styleN,
+                            fontSize=12,
+                            leading=15,
+                            alignment=0,  # Centered
+                            leftIndent=20,
+                            rightIndent=20,
+                            spaceBefore=10,
+                            spaceAfter=10)
+
+    main_paragraph = Paragraph(text, custom_style)
+    frame = Frame(2 * cm, 23 * cm, 17 * cm, 120, showBoundary=0)  # Adjust frame
+    frame.addFromList([main_paragraph], pdf)
+    
+
+    pdf.drawImage(image1_path, plot1_x, plot1_y, width=scaled_width1, height=scaled_height1)
+    pdf.drawImage(image2_path, plot2_x, plot2_y, width=scaled_width2, height=scaled_height2)
+
+    pdf.showPage()  # Finalize the current page
+    pdf = beautify_report(pdf,False,True)
+
     for contrast in contrasts:
         try:
             data = df.filter(regex=f'Subject Label|Session Label|{contrast}')
@@ -782,38 +952,38 @@ def generate_qc_report (cover, input) :
                 plot_failures_over_time(contrast,df)
 
                 # ------------------- Add Plots to PDF ------------------- #
-                # Positioning variables
-                plot_width = 270
 
                 # Load the first image (Plot 1)
                 image1_path = os.path.join(work_dir, f"QC_stacked_bar_{contrast}.png")
-                image1 = Image.open(image1_path)
-                image1_width, image1_height = image1.size
 
                 # Load the second image (Plot 2)
                 image2_path = os.path.join(work_dir, f"failure_artifacts_{contrast}.png")
-                image2 = Image.open(image2_path)
-                image2_width, image2_height = image2.size
 
                 # Load the third image (Plot 3)
                 image3_path = os.path.join(work_dir, f"failure_percentage_over_time_{contrast}.png")
-                image3 = Image.open(image3_path)
-                image3_width, image3_height = image3.size
 
-                # Calculate the scaled dimensions
-                scale1 = plot_width / image1_width
-                scaled_height1 = image1_height * scale1
+                # Load and scale the first image (Plot 1)
+                scaled_width1, scaled_height1 = scale_image(image1_path, 300, max_height)
+                # Load and scale the second image (Plot 2)
+                scaled_width2, scaled_height2 = scale_image(image2_path, 300, max_height)
+                # Load and scale the third image (Plot 3)
+                scaled_width3, scaled_height3 = scale_image(image3_path, 400, 400)
 
-                scale2 = plot_width / image2_width
-                scaled_height2 = image2_height * scale2
+                # Positioning variables (adjust as needed)
+                plot1_x = (page_width / 2) - scaled_width1 - (padding / 2)  # Left side
+                plot1_y = page_height - scaled_height1 - padding - 160
 
-                scale3 = 400 / image3_width
-                scaled_height3 = image3_height * scale3
+                plot2_x = (page_width / 2) + (padding / 2)  # Right side
+                plot2_y = plot1_y  # Same vertical position as Plot 1
+
+                plot3_x = (page_width - scaled_width3) / 2  # Centered horizontally
+                plot3_y = plot1_y - scaled_height3 - padding
+
 
                 # Positioning variables
-                padding = 10  # Space between plots
-
+                
                 pdf.setFont("Helvetica", 12)
+                pdf.setFillColorRGB(0, 0, 0)
                 pdf.drawString(50, page_height - 80, f"{contrast} acquisition plots:")
                 pdf.drawString(70, page_height - 100, "- Plot 1: Distribution of QC outcomes across all datasets.")
                 pdf.drawString(70, page_height - 120, "- Plot 2: Most frequent artifacts causing failures.")
@@ -821,19 +991,22 @@ def generate_qc_report (cover, input) :
 
 
                 # Plot 1 position (left, top row)
-                plot1_x = (page_width / 2) - plot_width - (padding / 2)  # Left side
-                plot1_y = page_height - max(scaled_height1, scaled_height2) - padding - 100 - 130
-                pdf.drawImage(image1_path, plot1_x, plot1_y, width=plot_width, height=scaled_height1)
+                # plot1_x = (page_width / 2) - plot_width - (padding / 2)  # Left side
+                # plot1_y = page_height - native_height1 - padding - 100 - 130
+                # pdf.drawImage(image1_path, plot1_x, plot1_y, width=native_width1, height=native_height1)
+                # Draw images with scaled dimensions
+                pdf.drawImage(image1_path, plot1_x, plot1_y, width=scaled_width1, height=scaled_height1)
 
                 # Plot 2 position (right, top row)
-                plot2_x = (page_width / 2) + (padding / 2)  # Right side
-                plot2_y = plot1_y # Same vertical position as Plot 1
-                pdf.drawImage(image2_path, plot2_x, plot2_y, width=plot_width, height=scaled_height2)
+                # plot2_x = (page_width / 2) + (padding / 2)  # Right side
+                # plot2_y = plot1_y # Same vertical position as Plot 1
+                pdf.drawImage(image2_path, plot2_x, plot2_y, width=scaled_width2, height=scaled_height2)
 
                 # Plot 3 position (centered below Plots 1 and 2)
-                plot3_x = ((page_width - plot_width) / 2 ) - 60 # Centered horizontally
-                plot3_y = plot1_y - scaled_height3 - padding
-                pdf.drawImage(image3_path, plot3_x, plot3_y, width=400, height=scaled_height3)
+                # plot3_x = ((page_width - plot_width) / 2 ) - 60 # Centered horizontally
+                # plot3_y = plot1_y - native_height3 - padding
+                pdf.drawImage(image3_path, plot3_x, plot3_y, width=scaled_width3, height=scaled_height3)
+                pdf = beautify_report(pdf,False,True)
                 pdf.showPage()  # Finalize the current page
         except Exception as e:
             print(f'Unable to run this on contrast {contrast} ', e)
