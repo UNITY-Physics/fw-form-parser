@@ -30,7 +30,7 @@ def main(context: GearToolkitContext) -> None:
         output = os.path.join(out_dir,output)
         # Run the pdf report function
         cover = create_cover_page(context, api_key, work_dir)
-        e_code = generate_qc_report(cover,output)
+        e_code = generate_qc_report(cover, api_key, output)
 
 
     except (TimeoutError, requests.exceptions.ConnectionError) as exc:

@@ -26,14 +26,14 @@
     },
     "gear-builder": {
       "category": "analysis",
-      "image": "flywheel/form-parser:0.1.8"
+      "image": "flywheel/form-parser:0.1.10"
     },
     "kcl-app-binary": "app/main.sh",
     "kcl-app-modalities": [
       "anat"
     ]
   },
-  "description": "This gear takes the annotations from visual QC and tags the acquisitions, and provides a pdf report about QC",
+  "description": "This gear takes the annotations from visual QC and tags the acquisitions and nifti, and provides a pdf report about QC.",
   "environment": {
     "CONDA_DIR": "/opt/conda",
     "FLYWHEEL": "/flywheel/v0",
@@ -62,5 +62,5 @@
   "name": "form-parser",
   "source": "",
   "url": "https://github.com/nialljb/fw-form-parser",
-  "version": "0.1.8"
+  "version": "0.1.10"
 }
