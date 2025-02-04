@@ -1172,9 +1172,11 @@ def generate_qc_report (cover, api_key, input) :
 
     gg = fw.gears.iter()
     gears = {}
-
+    gears_exclusion = ["ants-buildtemplateparallel","vbm-roi-estimation" ,"tripsr","curate-bids","bids-mriqc","write2work","file-classifier","nipype-interfaces-ants-segmentation-atropos","nii2dcm",
+    "sbet","dicom-mr-classifier", "ants-segmentation","hello-world","clinical","hyperfine-vbm","ciso","ants-vbm"]
+    
     for g in gg:
-        if g.gear.name :
+        if g.gear.name and g.gear.name not in gears_exclusion:
             gears[g.gear.name] = g.gear.description
 
     summary_asys = summary_asys.reset_index()
