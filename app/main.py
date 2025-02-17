@@ -571,6 +571,8 @@ def generate_qc_report (cover, api_key, input) :
         projects = df['Project Label'].unique()
         gear_activity = pd.DataFrame(columns=["Project Label","Latest QC run","Latest Sync run"])
 
+        
+
         for project in projects:
             project = fw.projects.find_one(f'label={project}')
             project = project.reload()
@@ -583,17 +585,21 @@ def generate_qc_report (cover, api_key, input) :
 
             for asys in analyses:
 
-                all_runs.append(asys.reload().gear_info.get('name'))
-                run_states.append(asys.reload().job.get('state'))
+                try:
 
-                gear_name = asys.gear_info.get('name')
-                created_date = asys.created
+                    all_runs.append(asys.reload().gear_info.get('name'))
+                    run_states.append(asys.reload().job.get('state'))
 
-                if gear_name == "form-parser":
-                    last_run_date_qc = max(last_run_date_qc, created_date) if last_run_date_qc else created_date
+                    gear_name = asys.gear_info.get('name')
+                    created_date = asys.created
 
-                elif gear_name == "custom-information-sync":
-                    last_run_date_sync = max(last_run_date_sync, created_date) if last_run_date_sync else created_date
+                    if gear_name == "form-parser":
+                        last_run_date_qc = max(last_run_date_qc, created_date) if last_run_date_qc else created_date
+
+                    elif gear_name == "custom-information-sync":
+                        last_run_date_sync = max(last_run_date_sync, created_date) if last_run_date_sync else created_date
+                except Exception as e:
+                    print('Exception caught: ', e)
 
             last_run_date_qc = last_run_date_qc.strftime('%Y-%m-%d') if last_run_date_qc else None
             last_run_date_sync = last_run_date_sync.strftime('%Y-%m-%d') if last_run_date_sync else None
@@ -605,13 +611,18 @@ def generate_qc_report (cover, api_key, input) :
             success_n , failure_n, last_30days =  0 , 0, 0
 
             for asys in analyses:
-                if asys.job.get('state')=="complete":
-                    success_n += 1
-                elif asys.job.get('state')!="complete":
-                    failure_n += 1
-                    
-                if (asys.created.replace(tzinfo=None) > (today - datetime.timedelta(30))):
-                    last_30days += 1
+
+                try:
+                    if asys.job.get('state')=="complete":
+                        success_n += 1
+                    elif asys.job.get('state')!="complete":
+                        failure_n += 1
+                        
+                    if (asys.created.replace(tzinfo=None) > (today - datetime.timedelta(30))):
+                        last_30days += 1
+                        
+                except Exception as e:
+                    print('Exception caught: ', e)
                 
             asys_df = pd.DataFrame(columns= ["Project Label", "Total Analyses","Success rate", "Analyses\nLast 30 days"],
                                 data=[[project.label,
