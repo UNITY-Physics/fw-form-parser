@@ -98,10 +98,15 @@ def run_tagger(context, api_key):
 
     # Filter the analyses by the gear name
     gear_to_find = gear.strip()  # Assuming 'gear' is the gear name you're looking for
-    filtered_gear_runs = [
-        run for run in analyses
-        if run.get('gear_info', {}).get('name', '').strip().casefold() == gear_to_find.casefold()
-    ]
+  
+    filtered_gear_runs =[]
+
+    for run in analyses:
+        try:
+            if run.get('gear_info', {}).get('name', '').strip().casefold() == gear_to_find.casefold():
+                filtered_gear_runs.append(run)
+        except Exception as e:
+            print('Exception caught ', e, run)
 
     # Get the latest gear run
     latest_gear_run = filtered_gear_runs[-1]
