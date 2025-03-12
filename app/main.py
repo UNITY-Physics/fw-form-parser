@@ -1,7 +1,6 @@
 """Main module."""
 
 import flywheel
-from fw_client import FWClient
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -80,7 +79,6 @@ def run_tagger(context, api_key):
         int: The exit code.
     """
 
-    client = FWClient(api_key=api_key)
     fw = flywheel.Client(api_key=api_key)
 
     # Get the destination container and project ID
@@ -295,8 +293,8 @@ def run_csv_parser(context, api_key):
     """
 
     # Step 1: Setup env and read the CSV
-    client = FWClient(api_key=api_key)
-    fw = flywheel.Client(api_key=api_key)
+    # client = FWClient(api_key=api_key)
+    # fw = flywheel.Client(api_key=api_key)
 
     # Get the destination container and project ID
 
