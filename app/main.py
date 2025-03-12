@@ -107,9 +107,14 @@ def run_tagger(context, api_key):
             print('Exception caught ', e, run)
 
     # Get the latest gear run
-    latest_gear_run = filtered_gear_runs[-1]
-    file_object = latest_gear_run.files
-    print("File object: ", file_object[0].name)
+    latest_gear_run = None
+    if filtered_gear_runs:
+        latest_gear_run =  filtered_gear_runs[-1]
+    
+
+    if latest_gear_run is not None:
+        file_object = latest_gear_run.files
+        print("File object: ", file_object[0].name)
 
     # Create a work directory in our local "home" directory
     work_dir = Path('/flywheel/v0/work', platform='auto')
@@ -321,9 +326,13 @@ def run_csv_parser(context, api_key):
             print('Exception caught ', e)
 
     # Get the latest gear run
-    latest_gear_run = filtered_gear_runs[-1]
-    file_object = latest_gear_run.files
-    print("File object: ", file_object[0].name)
+    latest_gear_run = None
+    if filtered_gear_runs:
+        latest_gear_run =  filtered_gear_runs[-1]
+
+    if latest_gear_run is not None:
+        file_object = latest_gear_run.files
+        print("File object: ", file_object[0].name)
 
     # Create a work directory in our local "home" directory
     work_dir = Path('/flywheel/v0/work', platform='auto')
