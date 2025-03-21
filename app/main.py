@@ -347,7 +347,11 @@ def run_csv_parser(context, api_key):
         out_dir.mkdir(parents = True)
 
     download_path = work_dir/file_object[0].name
-    file_object[0].download(download_path)
+    try:
+        file_object[0].download(download_path)
+        print("Downloaded the file ", download_path)
+    except Exception as e:
+        print("Caught exception ", e)
     raw_df = pd.read_csv(download_path)
     
 
@@ -380,16 +384,33 @@ def run_csv_parser(context, api_key):
 
 
     # Step 5: Filter for additional questions and pivot
+    expected_columns = ['banding', 'contrast', 'fov', 'motion', 'noise', 'other', 'zipper']
+
     additional_questions_df = df[df['Question'] != 'quality']
     additional_questions_df = additional_questions_df.pivot_table(index=['Subject Label', 'Session Label', 'Acquisition Label'], 
                                                                 columns='Question', 
                                                                 values='Answer', 
                                                                 aggfunc='first').reset_index()
 
-    # Flatten the multi-level columns for additional questions
-    additional_questions_wide = additional_questions_df.pivot(index=['Subject Label', 'Session Label'], 
-                                                            columns=['Acquisition Label'], 
-                                                            values=['banding', 'contrast', 'fov', 'motion', 'noise', 'other', 'zipper']).reset_index()
+    
+    available_values = [col for col in expected_columns if col in additional_questions_df.columns]
+
+    for col in expected_columns:
+        if col not in available_values:
+            additional_questions_df[col] = np.nan * len(additional_questions_df)
+
+    additional_questions_wide = additional_questions_df.pivot(
+        index=['Subject Label', 'Session Label'], 
+        columns=['Acquisition Label'], 
+        values=expected_columns
+    ).reset_index()
+
+    
+    #additional_questions_wide = additional_questions_wide.fillna(0)
+    # # Flatten the multi-level columns for additional questions
+    # additional_questions_wide = additional_questions_df.pivot(index=['Subject Label', 'Session Label'], 
+    #                                                         columns=['Acquisition Label'], 
+    #                                                         values=expected_columns).reset_index()
 
     # Flatten the multi-level columns
     additional_questions_wide.columns = ['_'.join(col).strip() if isinstance(col, tuple) else col for col in additional_questions_wide.columns]
@@ -404,13 +425,19 @@ def run_csv_parser(context, api_key):
     merged_df.drop(columns=['Subject Label_', 'Session Label_'], inplace=True)
 
     # Step 7: Relabel the values
-    relabel_map = {0: 'good', 1: 'unsure', 2: 'bad'}
+    # for col in merged_df.columns[2:]:
+    #     merged_df[col] = merged_df[col].astype('Int64') 
+
+    relabel_map = {0: 'good', 1: 'unsure', 2: 'bad', 
+               0.0: 'good', 1.0: 'unsure', 2.0: 'bad'}
     merged_df.replace(relabel_map, inplace=True)
+
+    #merged_df = merged_df.dropna(subset=[col for col in merged_df.columns if col.startswith("quality")], how="any")
 
     # Step 8: Check if answers to quality_AXI, quality_COR, quality_SAG are missing, all 'good', or any 'unsure', and set QC_all
     contrasts = ["T1","T2"]
     for contrast in contrasts:
-        filters= f'quality_AXI_{contrast}|quality_SAG_{contrast}|quality_COR_{contrast}'
+        filters= f'quality_{contrast}|quality_AXI_{contrast}|quality_SAG_{contrast}|quality_COR_{contrast}'
         df_filtered = merged_df.filter(regex=filters)
         qc_columns = df_filtered.columns.tolist()
 
@@ -430,9 +457,10 @@ def run_csv_parser(context, api_key):
         try:
             merged_df[f'QC_all_{contrast}'] = df_filtered.apply(determine_qc_status, axis=1)
             # Move 'QC_all' to just after 'quality_SAG'
-            qc_all_col = merged_df.pop(f'QC_all_{contrast}')
-            merged_df.insert(merged_df.columns.get_loc(f'quality_AXI_{contrast}') - 1, f'QC_all_{contrast}', qc_all_col)
-
+            # qc_all_col = merged_df.pop(f'QC_all_{contrast}')
+            # print("QC all col:", qc_all_col)
+            # #merged_df[f'QC_all_{contrast}'] = qc_all_col #merged_df.columns.get_loc(f'quality_AXI_{contrast}') 
+            # merged_df.insert(2, f'QC_all_{contrast}', qc_all_col)
             # regex_pattern = r'quality_SAG.*'
             # matched_columns = [col for col in merged_df.columns if re.match(regex_pattern, col)]
 
@@ -443,8 +471,8 @@ def run_csv_parser(context, api_key):
             #     merged_df.insert(col_index + 1, f'QC_all_{contrast}', qc_all_col)
 
                 #merged_df.insert(merged_df.columns.get_loc('quality_SAG') + 1, 'QC_all', qc_all_col)
-        except:
-            print(f'Error applying QC_all_{contrast} function: There may be missing values in the quality columns for AXI, COR, SAG')
+        except Exception as e:
+            print(f'Error applying QC_all_{contrast} function: ', e)
   
     # Get the current date and time
     now = datetime.datetime.now()
@@ -797,6 +825,10 @@ def generate_qc_report (cover, api_key, input) :
             loc='center'
         )
 
+        styles = getSampleStyleSheet()
+        description_style = styles["Normal"]
+        description_style.wordWrap = "CJK"  # Enables text wrapping
+
         # Customize table appearance
         table.auto_set_font_size(False)
         table.set_fontsize(14)
@@ -813,7 +845,7 @@ def generate_qc_report (cover, api_key, input) :
                 cell.set_facecolor('#f0f0f0')  # Light gray background for data rows
             
             cell.set_height(0.2)  # Increase row height
-            cell.set_width(0.2)   # Increase column width
+            cell.set_width(0.3)   # Increase column width
 
 
         # Adjust layout to ensure no overlap
@@ -868,7 +900,7 @@ def generate_qc_report (cover, api_key, input) :
         # ------------------- Plot 1: QC Stacked Barplot ------------------- #
         fig, ax = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [4, 1]})
         #Columns of interest
-        cols = [f"quality_AXI_{contrast}", f"quality_COR_{contrast}",f"quality_SAG_{contrast}",f"QC_all_{contrast}"]
+        cols = [f"quality_{contrast}", f"quality_AXI_{contrast}", f"quality_COR_{contrast}",f"quality_SAG_{contrast}",f"QC_all_{contrast}"]
         #filters= 'quality_AXI$|quality_SAG$|quality_COR$|QC$'
         df_filtered = df[[col for col in cols if col in df.columns]]
 
@@ -884,17 +916,18 @@ def generate_qc_report (cover, api_key, input) :
             f"quality_AXI_{contrast}": ["good", "unsure", "bad"],
             f"quality_COR_{contrast}": ["good", "unsure", "bad"],
             f"quality_SAG_{contrast}": ["good", "unsure", "bad"],
+            f"quality_{contrast}": ["good", "unsure", "bad"],
             f"QC_all_{contrast}": ["passed", "unsure", "failed", "incomplete"]
 
         }
 
         color_palette = {
-            'good': '#6D9C77',        # Cool-toned green
-            'passed': '#6D9C77',      # Cool-toned green
-            'unsure': '#E7C069',      # Soft, subtle yellow
-            'bad': '#D96B6B',         # Muted red
-            'failed': '#D96B6B',      # Muted red
-            'incomplete': '#6A89CC'   # Muted blue
+            'good': '#1F8B4C',        # Vibrant emerald green
+            'passed': '#1F8B4C',      # Vibrant emerald green
+            'unsure': '#FFC300',      # Bold golden yellow
+            'bad': '#E63946',         # Strong, eye-catching red
+            'failed': '#E63946',      # Strong, eye-catching red
+            'incomplete': '#0077CC'   # Bright, vivid blue
         }
 
         # Example data
@@ -939,7 +972,7 @@ def generate_qc_report (cover, api_key, input) :
                 color=color_palette[category],
                 edgecolor="black",
                 label=category,
-                bottom=bottom,
+                bottom=bottom
             )
             # Add percentages inside the stacks
             for i, val in enumerate(pivot_data[category]):
@@ -956,20 +989,22 @@ def generate_qc_report (cover, api_key, input) :
             bottom += pivot_data[category]
 
         # Configure the main plot
-        ax[0].set_title(f"Quality Control by Acquisition Type ({contrast})", fontsize=16)
+        ax[0].set_title(f"Quality Control by Acquisition Type ({contrast})", fontsize=16,pad=20)
         ax[0].set_xlabel("Acquisition", fontsize=12)
         ax[0].set_ylabel("Counts", fontsize=12)
+        ax[0].margins(y=0.1)
+        #ax[0].set_ylim(0, pivot_data[category].max() * 1.1)
+        ax[0].spines['top'].set_visible(False)
         ax[0].set_xticks(range(len(pivot_data.index)))
-        ax[0].set_xticklabels(pivot_data.index.str.replace('_',' '), fontsize=10)
-        
+        ax[0].set_xticklabels(pivot_data.index.str.replace('_',' ').str.title(), fontsize=10)
         
         plt.legend().remove()  # Remove the default legend
 
         custom_legend_mapping = {
-        'Good/Passed': '#6D9C77',  # Shared color for 'good' and 'passed'
-        'Unsure': '#E7C069',       # Color for 'unsure'
-        'Bad/Failed': '#D96B6B',   # Shared color for 'bad' and 'failed'
-        'Incomplete': '#6A89CC'    # Color for 'incomplete'
+        'Good/Passed': '#1F8B4C',  # Shared color for 'good' and 'passed'
+        'Unsure': '#FFC300',       # Color for 'unsure'
+        'Bad/Failed': '#E63946',   # Shared color for 'bad' and 'failed'
+        'Incomplete': '#0077CC'    # Color for 'incomplete'
     }
 
         # Create a custom legend
@@ -988,9 +1023,9 @@ def generate_qc_report (cover, api_key, input) :
         ax[1].axis('off')  # Turn off axes for the text area
         ax[1].text(
             0.5, 0.45,  # Center the text in the subplot
-            f"Number of scans included: {len(df['Subject Label'])}\n"
-            f"Number of unique participants: {df['Subject Label'].nunique()}"
-            f"\nNumber of usable scans: {len(df[df[f'QC_all_{contrast}'] == 'passed'])}",
+            f"Number of unique sessions: {df['Session Label'].nunique()}\n"
+            f"Number of unique participants: {df['Subject Label'].nunique()}\n"
+            f"Number of usable (passed) scans: {len(df[df[f'QC_all_{contrast}'] == 'passed'])}",
             ha='center',
             va='center',
             fontsize=13,
@@ -1031,20 +1066,20 @@ def generate_qc_report (cover, api_key, input) :
 
         # Convert to DataFrame
         failure_df = pd.DataFrame(failure_data)
-        failure_df.to_csv(os.path.join(work_dir,f"failures_df_{contrast}.csv"))
+        failure_df.to_csv(os.path.join(work_dir,f"failures_df_{contrast}.csv"),index=False)
 
         # Plot as a bar chart
         
         sns.barplot(data=failure_df, x="Artifact", y="Failure Rate (%)",ax=ax[0],  palette="coolwarm")
-        ax[0].set_title(f"Failure Rates by Artifact Type ({contrast})", fontsize=16)
+        ax[0].set_title(f"Failure Rates by Artifact Type ({contrast})", fontsize=16,pad=20)
         ax[0].set_xlabel("Artifact Type", fontsize=12)
         ax[0].set_ylabel("Failure Rate (%)", fontsize=12)
         ax[0].set_xticklabels(failure_df.Artifact.str.title())
-
+        ax[1].spines['top'].set_visible(False)
         ax[1].axis('off')  # Turn off axes for the text area
         ax[1].text(
             0.5, 0.45,  # Center the text in the subplot
-            f"Number of failed scans: {len(failure_df)}/{len(df)}",
+            f"Number of failed scans: {len(df[df[f'QC_all_{contrast}'] == 'failed'])}/{len(df)}",
             ha='center',
             va='center',
             fontsize=13,
