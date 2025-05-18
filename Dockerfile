@@ -33,6 +33,7 @@ RUN pip3 install flywheel-gear-toolkit && \
     pip3 install fw_client==1.0.0 && \
     pip3 install reportlab && \
     pip3 install PyPDF2 && \ 
+    pip3 install PyYAML && \ 
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Configure entrypoint

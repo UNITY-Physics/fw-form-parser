@@ -6,9 +6,11 @@ import numpy as np
 from pathlib import Path
 import os
 import logging
-import datetime
 import os
 import re
+from datetime import datetime, timedelta
+import pytz
+import yaml
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -103,10 +105,13 @@ def run_tagger(context, api_key):
 
     for run in analyses:
         try:
-            if run.get('gear_info', {}).get('name', '').strip().casefold() == gear_to_find.casefold() and run.reload().job.get('state')=="complete":
+            if run is not None and run.get('gear_info') is None and gear in run.label:
+                filtered_gear_runs.append(run)
+
+            if run is not None and run.get('gear_info', {}).get('name', '').strip().casefold() == gear_to_find.casefold() and run.reload().job.get('state')=="complete":
                 filtered_gear_runs.append(run)
         except Exception as e:
-            print('Exception caught ', e, run)
+            log.error(f'Exception caught  {e} {run}')
 
     # Get the latest gear run
     latest_gear_run = None
@@ -116,7 +121,7 @@ def run_tagger(context, api_key):
 
     if latest_gear_run is not None:
         file_object = latest_gear_run.files
-        print("File object: ", file_object[0].name)
+        #log.info(f"File object:  {file_object[0].name}")
 
     # Create a work directory in our local "home" directory
     work_dir = Path('/flywheel/v0/work', platform='auto')
@@ -130,6 +135,8 @@ def run_tagger(context, api_key):
     if not out_dir.exists():
         out_dir.mkdir(parents = True)
 
+    print("*** FILE OBJECT ***", len(file_object))
+
     download_path = work_dir/file_object[0].name
     file_object[0].download(download_path)
     df = pd.read_csv(download_path)
@@ -138,7 +145,7 @@ def run_tagger(context, api_key):
     for task_id in df['Session Label'].unique():
         task_df = df[df['Session Label'] == task_id]
 
-    # Preallocate variables
+        # Preallocate variables
         axi = None
         cor = None
         sag = None
@@ -149,9 +156,14 @@ def run_tagger(context, api_key):
         for index, row, in task_df.iterrows():
             # pull the acquisition object from the API
             acquisition_id = row['acquisition.id']
-            acquisition = fw.get_acquisition(acquisition_id)
+            try:
+                acquisition = fw.get_acquisition(acquisition_id)
+            except flywheel.ApiException as e:
+                log.error(f'Error getting acquisition: {e}')
+                continue
+
             if row['Question'] == "quality" and row['Answer'] == 0:
-                print('QC-passed', row['Subject Label'], row['Acquisition Label'], row['acquisition.id'])
+                log.info(f"QC-passed {row['Subject Label']} {row['Acquisition Label']} {row['acquisition.id']}")
                 
                 # Set the orientation variable for later use in the session QC
                 if 'AXI' in row['Acquisition Label'] or 'axi' in row['Acquisition Label']:
@@ -168,7 +180,7 @@ def run_tagger(context, api_key):
 
 
                 except flywheel.ApiException as e:
-                    print('Error adding tag to acquisition:', e)
+                    log.error(f'Error adding tag to acquisition: {e}')
 
                 try:
                     # Add a tag to the file
@@ -181,11 +193,11 @@ def run_tagger(context, api_key):
                     file.add_tag('QC-passed')
 
                 except flywheel.ApiException as e:
-                    print('Error adding tag to file:', e)
+                    log.error(f'Error adding tag to file: {e}')
 
 
             elif row['Question'] == "quality" and row['Answer'] == 1:
-                print('QC-unclear', row['Subject Label'], row['Acquisition Label'], row['acquisition.id'])
+                log.info(f"QC-unclear {row['Subject Label']} {row['Acquisition Label']} {row['acquisition.id']}")
                 
                 # Set the orientation variable for later use in the session QC
                 if 'AXI' in row['Acquisition Label'] or 'axi' in row['Acquisition Label']:
@@ -201,7 +213,7 @@ def run_tagger(context, api_key):
                     acquisition.delete_tag('read')
 
                 except flywheel.ApiException as e:
-                    print('Error adding tag to acquisition:', e)
+                    log.error(f'Error adding tag to acquisition: {e}')
 
                 try:
                     # Add a tag to the file
@@ -213,10 +225,10 @@ def run_tagger(context, api_key):
                     file = fw.get_file(file_id)
                     file.add_tag('QC-unclear')
                 except flywheel.ApiException as e:
-                    print('Error adding tag to file:', e)
+                    log.error(f'Error adding tag to file: {e}')
 
             elif row['Question'] == "quality" and row['Answer'] == 2:
-                print('QC-failed', row['Subject Label'], row['Acquisition Label'], row['acquisition.id'])
+                log.info(f"QC-failed {row['Subject Label']} {row['Acquisition Label']} {row['acquisition.id']}")
                 
                 # Set the orientation variable for later use in the session QC
                 if 'AXI' in row['Acquisition Label'] or 'axi' in row['Acquisition Label']:
@@ -232,7 +244,7 @@ def run_tagger(context, api_key):
                     acquisition.delete_tag('read')
 
                 except flywheel.ApiException as e:
-                    print('Error adding tag to acquisition:', e)
+                    log.error(f'Error adding tag to acquisition: {e}')
 
                 try:
                     # Add a tag to the file
@@ -244,12 +256,12 @@ def run_tagger(context, api_key):
                     file = fw.get_file(file_id)
                     file.add_tag('QC-failed')
                 except flywheel.ApiException as e:
-                    print('Error adding tag to file:', e)
+                    log.error(f'Error adding tag to file: {e}')
 
             # Check if all the three orientations have passed QC
             # Add a tag to a session [T2w_QC_passed, T2w_QC_failed, T2w_QC_unclear]
             if axi == 'pass' and cor == 'pass' and sag == 'pass':
-                print('T2w QC passed', row['Subject Label'])
+                log.info(f"T2w QC passed {row['Subject Label']}")
                 t2_qc = 'pass'
                 session_id = row['session.id']
                 session = fw.get_session(session_id)
@@ -257,9 +269,9 @@ def run_tagger(context, api_key):
                     # Add a tag to a session
                     session.add_tag('T2w_QC_passed')
                 except flywheel.ApiException as e:
-                        print('Error adding tag to session:', e)
+                        log.error(f'Error adding tag to session: {e}')
             elif axi == 'fail' or cor == 'fail' or sag == 'fail':
-                print('T2w QC failed', row['Subject Label'])
+                log.info(f"T2w QC failed {row['Subject Label']}")
                 t2_qc = 'fail'
                 session_id = row['session.id']
                 session = fw.get_session(session_id)
@@ -267,9 +279,9 @@ def run_tagger(context, api_key):
                     # Add a tag to a session
                     session.add_tag('T2w_QC_failed')
                 except flywheel.ApiException as e:
-                        print('Error adding tag to session:', e)
+                        log.error(f'Error adding tag to session: {e}')
             elif axi == 'unclear' or cor == 'unclear' or sag == 'unclear':
-                print('T2w QC unclear', row['Subject Label'])
+                log.info(f"T2w QC unclear {row['Subject Label']}")
                 t2_qc = 'unclear'
                 session_id = row['session.id']
                 session = fw.get_session(session_id)
@@ -277,7 +289,7 @@ def run_tagger(context, api_key):
                     # Add a tag to a session
                     session.add_tag('T2w_QC_unclear')
                 except flywheel.ApiException as e:
-                        print('Error adding tag to session:', e)
+                        log.error(f'Error adding tag to session: {e}')
             
             # Append the results to the preallocated lists
             print("***")
@@ -321,20 +333,25 @@ def run_csv_parser(context, api_key):
     filtered_gear_runs =[]
 
     for run in analyses:
+        #print(run)
         try:
-            if run.get('gear_info', {}).get('name', '').strip().casefold() == gear_to_find.casefold() and run.reload().job.get('state')=="complete":
+            #take into account analysis containers not just gears
+            if run is not None and run.get('gear_info') is None and gear in run.label:
+                 filtered_gear_runs.append(run)
+            if run is not None and run.get('gear_info', {}).get('name', '').strip().casefold() == gear_to_find.casefold() and run.reload().job.get('state')=="complete":
                 filtered_gear_runs.append(run)
         except Exception as e:
-            print('Exception caught ', e)
+            log.info(f'Exception caught {e}')
 
     # Get the latest gear run
     latest_gear_run = None
     if filtered_gear_runs:
         latest_gear_run =  filtered_gear_runs[-1]
+        #print(latest_gear_run)
 
     if latest_gear_run is not None:
         file_object = latest_gear_run.files
-        print("File object: ", file_object[0].name)
+        log.info(f"File object: {file_object[0].name}")
 
     # Create a work directory in our local "home" directory
     work_dir = Path('/flywheel/v0/work', platform='auto')
@@ -348,17 +365,20 @@ def run_csv_parser(context, api_key):
     if not out_dir.exists():
         out_dir.mkdir(parents = True)
 
+    
     download_path = work_dir/file_object[0].name
     try:
         file_object[0].download(download_path)
-        print("Downloaded the file ", download_path)
+        log.info(f"Downloaded the file {download_path}")
     except Exception as e:
-        print("Caught exception ", e)
+        log.info(f"Caught exception {e}")
     raw_df = pd.read_csv(download_path)
     
+    log.info(f"Unique subjecst: {raw_df['Subject Label'].nunique()}")
+
 
     # Step 2: Select columns by name
-    df = raw_df[['Project Label', 'Subject Label', 'Session Label', 'Acquisition Label', 'Question', 'Answer']]
+    df = raw_df[['Project Label', 'Subject Label', 'Session Label', 'Session Timestamp','Acquisition Label', 'Question', 'Answer']]
 
     # Step 3: Save the filtered DataFrame to a new CSV (optional)
     df.to_csv('/flywheel/v0/work/filtered_file.csv', index=False)
@@ -369,7 +389,7 @@ def run_csv_parser(context, api_key):
 
     # Step 4: Filter for 'quality' questions and pivot
     quality_df = df[df['Question'] == 'quality']
-    pivot_quality_df = quality_df.pivot_table(index=['Subject Label', 'Session Label'], 
+    pivot_quality_df = quality_df.pivot_table(index=['Subject Label', 'Session Label','Session Timestamp'], 
                                             columns='Acquisition Label', 
                                             values='Answer', 
                                             aggfunc='first').reset_index()
@@ -389,7 +409,7 @@ def run_csv_parser(context, api_key):
     expected_columns = ['banding', 'contrast', 'fov', 'motion', 'noise', 'other', 'zipper']
 
     additional_questions_df = df[df['Question'] != 'quality']
-    additional_questions_df = additional_questions_df.pivot_table(index=['Subject Label', 'Session Label', 'Acquisition Label'], 
+    additional_questions_df = additional_questions_df.pivot_table(index=['Subject Label', 'Session Label', 'Session Timestamp','Acquisition Label'], 
                                                                 columns='Question', 
                                                                 values='Answer', 
                                                                 aggfunc='first').reset_index()
@@ -402,7 +422,7 @@ def run_csv_parser(context, api_key):
             additional_questions_df[col] = np.nan * len(additional_questions_df)
 
     additional_questions_wide = additional_questions_df.pivot(
-        index=['Subject Label', 'Session Label'], 
+        index=['Subject Label', 'Session Label','Session Timestamp'], 
         columns=['Acquisition Label'], 
         values=expected_columns
     ).reset_index()
@@ -416,15 +436,17 @@ def run_csv_parser(context, api_key):
 
     # Flatten the multi-level columns
     additional_questions_wide.columns = ['_'.join(col).strip() if isinstance(col, tuple) else col for col in additional_questions_wide.columns]
+    #print(pivot_quality_df.columns)
+    #print(additional_questions_wide.columns)
 
     # Step 6: Merge the quality checks with additional questions
-    merged_df = pd.merge(pivot_quality_df, additional_questions_wide, left_on=['quality_Subject Label', 'quality_Session Label'], right_on=['Subject Label_', 'Session Label_'], how='left')
+    merged_df = pd.merge(pivot_quality_df, additional_questions_wide, left_on=['quality_Subject Label', 'quality_Session Label','quality_Session Timestamp'], right_on=['Subject Label_', 'Session Label_','Session Timestamp_'], how='left')
 
     # Rename columns for clarity
-    merged_df.rename(columns={'quality_Subject Label': 'Subject Label', 'quality_Session Label': 'Session Label'}, inplace=True)
+    merged_df.rename(columns={'quality_Subject Label': 'Subject Label', 'quality_Session Label': 'Session Label','quality_Session Timestamp':'Session Timestamp'}, inplace=True)
 
     # Remove the redundant 'Subject Label_' column
-    merged_df.drop(columns=['Subject Label_', 'Session Label_'], inplace=True)
+    merged_df.drop(columns=['Subject Label_', 'Session Label_','Session Timestamp_'], inplace=True)
 
     # Step 7: Relabel the values
     # for col in merged_df.columns[2:]:
@@ -434,6 +456,7 @@ def run_csv_parser(context, api_key):
                0.0: 'good', 1.0: 'unsure', 2.0: 'bad'}
     merged_df.replace(relabel_map, inplace=True)
 
+    
     #merged_df = merged_df.dropna(subset=[col for col in merged_df.columns if col.startswith("quality")], how="any")
 
     # Step 8: Check if answers to quality_AXI, quality_COR, quality_SAG are missing, all 'good', or any 'unsure', and set QC_all
@@ -461,10 +484,10 @@ def run_csv_parser(context, api_key):
         try:
             merged_df[f'QC_all_{contrast}'] = df_filtered.apply(determine_qc_status, axis=1)
         except Exception as e:
-            print(f'Error applying QC_all_{contrast} function: ', e)
+            log.error(f'Error applying QC_all_{contrast} function: {e}')
   
     # Get the current date and time
-    now = datetime.datetime.now()
+    now = datetime.now(pytz.utc)
     formatted_date = now.strftime("%Y-%m-%d_%H-%M-%S")
 
     # Step 9: Export the results to a CSV file
@@ -472,7 +495,7 @@ def run_csv_parser(context, api_key):
         log.info("Exporting annotations to CSV file.")
         output_filename = f"parsed_qc_annotations_{formatted_date}.csv"
         merged_df.to_csv(context.output_dir / output_filename, index=False)
-    print(f'Parsed QC data saved to: {output_filename}')
+    log.info(f'Parsed QC data saved to: {output_filename}')
     return (0, os.path.join(context.output_dir,output_filename))
 
 # 1. Generate Cover Page
@@ -498,7 +521,7 @@ def create_cover_page(context, api_key, output_dir):
     project = project.reload()
     project_description = project.description.replace('\n','<br/>') 
 
-    print(f"Project Label: {project_label}")
+    log.info(f"Project Label: {project_label}")
     filename = 'cover_page'
     cover = os.path.join(output_dir, f"{filename}.pdf")
 
@@ -529,7 +552,7 @@ def create_cover_page(context, api_key, output_dir):
     # Build the document
     doc.addPageTemplates([template])
     doc.build(elements)
-    print("Cover page has been generated.")
+    log.info("Cover page has been generated.")
 
     return cover
 
@@ -573,35 +596,17 @@ def generate_qc_report (context, cover, api_key, input) :
         #Use QC_all_{contrast} to get number of session?  
         df = pd.read_csv('/flywheel/v0/work/filtered_file.csv')
 
-        ## Preprocess the session_date to replace underscores with colons
-        df['session_date'] = pd.to_datetime(df['Session Label'].str.split(' ').str[0], errors='coerce')
-
-        # #Simplify acquisition label for counts
+        # Simplify acquisition label for counts
         df.loc[:, 'Acquisition Label'] = df['Acquisition Label'].apply(simplify_label)
 
-        # #Check for any parsing issues
-        # if df['session_date'].isnull().any():
-        #     print("Warning: Some dates could not be parsed.")
-
-        # # Count unique dates
-        df['month'] = df['session_date'].dt.to_period('M')
-        total_counts = df.groupby(['Project Label','month']).size()
-
-        total_counts = total_counts.reset_index()
-        total_counts.columns = ['Project Label','month','Values']
-
+        now = datetime.now(pytz.utc)
         today = pd.Timestamp.today()
-        # # Filter rows where session_date is within the last 30 days
-        # last_30_days = df[(df['session_date'] >= pd.Timestamp.today() - pd.Timedelta(days=30)) & (df['session_date'] <= today)]
-
-        # # Latest QC/Sync gear runs
-        # today = datetime.datetime.now()
-
+        thirty_days_ago = now - timedelta(days=30)  
+       
         projects = df['Project Label'].unique()
         gear_activity = pd.DataFrame(columns=["Project Label","Latest QC run","Latest Sync run"])
 
         summary_df = pd.DataFrame(columns=["Project Label",'Total Sessions', "Sessions\nLast 30 days",'Unique Subjects'])
-        
 
         for project in projects:
             project = fw.projects.find_one(f'label={project}')
@@ -629,7 +634,7 @@ def generate_qc_report (context, cover, api_key, input) :
                     elif gear_name == "custom-information-sync":
                         last_run_date_sync = max(last_run_date_sync, created_date) if last_run_date_sync else created_date
                 except Exception as e:
-                    print('Exception caught: ', e)
+                    log.info(f'Exception caught:  {e}')
 
             last_run_date_qc = last_run_date_qc.strftime('%Y-%m-%d') if last_run_date_qc else None
             last_run_date_sync = last_run_date_sync.strftime('%Y-%m-%d') if last_run_date_sync else None
@@ -648,11 +653,11 @@ def generate_qc_report (context, cover, api_key, input) :
                     elif asys.job.get('state')!="complete":
                         failure_n += 1
                         
-                    if (asys.created.replace(tzinfo=None) > (today - datetime.timedelta(30))):
+                    if (asys.created.replace(tzinfo=None) > (today - timedelta(30))):
                         last_30days += 1
                         
                 except Exception as e:
-                    print('Exception caught: ', e)
+                    log.error(f'Exception caught: {e}')
                 
             asys_df = pd.DataFrame(columns= ["Project Label", "Total Analyses","Analyses\nSuccess rate", "Analyses\nLast 30 days"],
                                 data=[[project.label,
@@ -664,21 +669,31 @@ def generate_qc_report (context, cover, api_key, input) :
             asys_df = pd.concat([asys_df.set_index('Project Label'),gear_activity.set_index('Project Label')],axis=1,join='inner').reset_index()
 
             #### Sessions in the last 30 days
-            all_sessions = [session.label for session in project.sessions()]
+            all_sessions = [session.subject.label + '_' + session.label for session in project.sessions()]
             all_subjects = [subject.label for subject in project.subjects()]
 
-            all_sessions_date = pd.to_datetime(pd.Series(all_sessions).str.split(' ').str[0], errors='coerce')
+            #all_sessions_date = pd.to_datetime(pd.Series(all_sessions).str.split(' ').str[0], errors='coerce')
+            all_sessions_date = [session.timestamp for session in project.sessions()]
+            all_sessions_date = pd.to_datetime(pd.Series(all_sessions_date), errors='coerce')
 
             #today = pd.Timestamp.today()
             # Filter rows where session_date is within the last 30 days
-            last_30_days = all_sessions_date[all_sessions_date >= (today - pd.Timedelta(days=30))]
+            now = datetime.now(pytz.utc)
+            
+            last_30_days = (all_sessions_date >= thirty_days_ago) & (all_sessions_date <= now)
+
+            recent_sessions = pd.DataFrame({
+                'label': all_sessions,
+                'created': all_sessions_date
+            }).loc[last_30_days]
 
 
+            ## Use timestamp of sessions
+            df['session_date'] = pd.to_datetime(df['Session Timestamp'], errors='coerce')
             #Check for any parsing issues
             if df['session_date'].isnull().any():
-                print("Warning: Some dates could not be parsed.")
+                log.warning("Warning: Some dates could not be parsed.")
 
-            # Count unique dates
             df['month'] = df['session_date'].dt.to_period('M')
             total_counts = df.groupby(['Project Label','month']).size()
 
@@ -686,7 +701,7 @@ def generate_qc_report (context, cover, api_key, input) :
             total_counts.columns = ['Project Label','month','Values']
 
             # Filter rows where session_date is within the last 30 days
-            summary_df.loc[len(summary_df),:] = [project.label, pd.Series(all_sessions).nunique(),pd.Series(last_30_days).nunique() , pd.Series(all_subjects).nunique()]
+            summary_df.loc[len(summary_df),:] = [project.label, pd.Series(all_sessions).nunique(),recent_sessions.label.nunique() , pd.Series(all_subjects).nunique()]
             
 
         #########################
@@ -704,28 +719,11 @@ def generate_qc_report (context, cover, api_key, input) :
         #    .reset_index()
 
         ### Data missingness ###
-        subject_session_labels = {
-        "age_at_scan_months": "Age at scan (Chronological)",
-        "gestational_age_weeks": "Gestation",
-        "sex_at_birth": "Child Sex at Birth",
-        "birth_weight_kg": "Birth Weight",
-        "birth_length_cm": "Birth Length",
-        "family_size_at_scan": "Family Size (at scan)",
-        "num_children_in_family": "Number of Children in Family",
-        "birth_order": "Birth Ordinal",
-        "current_height_cm": "Current Height at scan",
-        "current_weight_kg": "Current Weight at scan",
-        "current_head_circumference_cm": "Current Head Circumference at scan (measured)",
-        "country_of_birth": "Country of Birth / Home",
-        "city_of_birth": "City of Birth / Home",
-        "maternal_education": "Maternal education",
-        "maternal_age_at_birth": "Maternal age at child birth",
-        "father_owns_cellphone": "Father owns a cell phone at scan",
-        "mother_owns_cellphone": "Mother owns a cell phone at scan",
-        "child_health_group": "Child Health Grouping (Healthy, iron deficiency / anemia, underweight, HIV exposed etc.)",
-        "gsed_composite_score": "GSED Composite Score",
-        "gsed_psychosocial_score": "GSED Psychosocial Score (total score)"
-    }
+
+        with open(f"/flywheel/v0/utils/subject_session_info_labels.yaml", 'r') as file:
+            metadata = yaml.safe_load(file)
+
+        subject_session_labels = metadata["subject_session_labels"]
         #------------ Plotting --------
 
         fig2 = plt.figure(figsize=(11.7, 8.3))
@@ -950,7 +948,7 @@ def generate_qc_report (context, cover, api_key, input) :
         rows_with_all_t2_fast = scans[has_all_t2_fast]
 
         count = has_all_t2_fast.sum()
-        print(f"Number of sessions with all T2 Fast planes: {count}")
+        log.info(f"Number of sessions with all T2 Fast planes: {count}")
 
         # 2. Create the 2D list of table data
         table_data = scan_totals.values.tolist()
@@ -1076,14 +1074,14 @@ def generate_qc_report (context, cover, api_key, input) :
         #Columns of interest
         cols = [f"quality_{contrast}", f"quality_AXI_{contrast}", f"quality_COR_{contrast}",f"quality_SAG_{contrast}",f"QC_all_{contrast}"]
         #filters= 'quality_AXI$|quality_SAG$|quality_COR$|QC$'
+
+        # print("Contrast ", contrast, df.shape)
+        # print(df)
         
         unsure_rows = df[df.eq('unsure').any(axis=1)]
-
         unsure_rows.to_csv(os.path.join(out_dir, "unsure_for_review.csv"))
-
         df_filtered = df[[col for col in cols if col in df.columns]]
 
-        
 
         # print(df_filtered)
 
@@ -1202,13 +1200,15 @@ def generate_qc_report (context, cover, api_key, input) :
             loc='upper left',fontsize=12
         )
 
+        num_unique_sessions = df[['Subject Label', 'Session Timestamp']].drop_duplicates().shape[0]
+
         # Add explanation text in the second subplot
         ax[1].axis('off')  # Turn off axes for the text area
         ax[1].text(
             0.5, 0.45,  # Center the text in the subplot
-            f"Number of unique sessions: {df['Session Label'].nunique()}\n"
             f"Number of unique participants: {df['Subject Label'].nunique()}\n"
-            f"Number of usable (passed) scans: {len(df[df[f'QC_all_{contrast}'] == 'passed'])}",
+            f"Number of unique sessions: {num_unique_sessions}\n"
+            f"Number of successful sessions: {len(df[df[f'QC_all_{contrast}'] == 'passed'])}",
             ha='center',
             va='center',
             fontsize=14,
@@ -1300,10 +1300,10 @@ def generate_qc_report (context, cover, api_key, input) :
             x_axis_threshold = 30  # Max number of x-axis points for readability
 
             ## Preprocess the session_date to replace underscores with colons
-            df['session_date'] = pd.to_datetime(df['Session Label'].str.split(' ').str[0], errors='coerce')
+            df['session_date'] = pd.to_datetime(df['Session Timestamp'], errors='coerce')
             #Check for any parsing issues
             if df['session_date'].isnull().any():
-                print("Warning: Some dates could not be parsed.")
+                log.warning("Warning: Some dates could not be parsed.")
 
             # Count unique dates
             unique_dates = df['session_date'].nunique()
@@ -1355,7 +1355,7 @@ def generate_qc_report (context, cover, api_key, input) :
                 )
             
         except Exception as e:
-            print(e)
+            log.error(e)
 
             # Add explanation text just below the plot within the figure
             plt.figtext(0.20, 0.25,  # Position relative to the figure (0.42 keeps it below ax)
@@ -1510,10 +1510,9 @@ def generate_qc_report (context, cover, api_key, input) :
         doc.build(elements)
 
     
-
     for contrast in contrasts:
         try:
-            data = df.filter(regex=f'Subject Label|Session Label|{contrast}')
+            data = df.filter(regex=f'Subject Label|Session Label|Session Timestamp|{contrast}')
             #if the contrast is found, i.e. there are more than 2 columns in the dataframe
             if len(data.columns.tolist()) > 2:
                 qc_barplot(contrast,data)
@@ -1594,7 +1593,7 @@ def generate_qc_report (context, cover, api_key, input) :
                 pdf = beautify_report(pdf,False,True)
                 pdf.showPage()  # Finalize the current page
         except Exception as e:
-            print(f'Unable to run this on contrast {contrast} ', e)
+            log.error(f'Unable to run this on contrast {contrast} {e}')
 
 
     try:
@@ -1603,7 +1602,7 @@ def generate_qc_report (context, cover, api_key, input) :
 
         merger = PdfMerger()
         # Get the current timestamp
-        current_timestamp = datetime.datetime.now()
+        current_timestamp = datetime.now()
         # Format the timestamp as a string
         formatted_timestamp = current_timestamp.strftime('%Y-%m-%d_%H-%M-%S')
         final_report = os.path.join(out_dir,f"qc_report_{formatted_timestamp}.pdf")
@@ -1622,17 +1621,18 @@ def generate_qc_report (context, cover, api_key, input) :
         # Write to a final PDF
         merger.write(final_report)
         merger.close()
-        print('QC Report saved')
+        log.info('QC Report saved')
 
 
         project  = fw.projects.find_one(f'label={project_label}')
         project = project.reload() 
 
         custom_name = f"QC_report_{formatted_timestamp}.pdf"
-        #project.upload_file(final_report, filename=custom_name)
-        #project.upload_file(os.path.join(out_dir,"SessionData_Missingness.csv"),filename="SessionData_Missingness.csv")
+        project.upload_file(final_report, filename=custom_name)
+        project.upload_file(os.path.join(out_dir,"SessionData_Missingness.csv"),filename="SessionData_Missingness.csv")
+        log.info("Report has been uploaded to the project's information tab.")
 
     except Exception as e:
-        print(e)
+        log.error(e)
 
     return 0
