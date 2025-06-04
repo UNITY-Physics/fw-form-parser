@@ -724,6 +724,12 @@ def generate_qc_report (context, cover, api_key, input) :
             metadata = yaml.safe_load(file)
 
         subject_session_labels = metadata["subject_session_labels"]
+
+        with open('/flywheel/v0/utils/metadata_fields.yaml', 'r') as file:
+            metadata = yaml.safe_load(file)
+
+        default = metadata["metadata_template"]
+
         #------------ Plotting --------
 
         fig2 = plt.figure(figsize=(11.7, 8.3))
@@ -842,7 +848,7 @@ def generate_qc_report (context, cover, api_key, input) :
         all_runs = []
         run_states = []
 
-        data_missingness = pd.DataFrame(columns=['Subject',"Session"]+ list(subject_session_labels.values()))
+        data_completeness = pd.DataFrame(columns=['Subject',"Session"]+ list(subject_session_labels.keys()))
         
         
         for subject in subjects:
@@ -858,11 +864,20 @@ def generate_qc_report (context, cover, api_key, input) :
                 row = {"Subject": subject_label, "Session": session_label}
 
                 # Fill in 1 for present, 0 for missing
+                for metadata in subject_session_labels.keys():
+                    value = session.info.get(metadata, None)
+                    print(subject_label, session_label, metadata, value)
+                    if value is None or value == "" or value == "Not Found" or default.get(metadata):
+                        row[metadata] = 0
+                    else:
+                        row[metadata] = 1
+
+
                 for metadata in subject_session_labels:
                     value = session.info.get(metadata, None)
                     row[metadata] = 1 if value is not None else 0
 
-                data_missingness.loc[len(data_missingness)] = row
+                data_completeness.loc[len(data_completeness)] = row
 
 
                 #log.info('**** Check for session analyses *****')
@@ -1044,26 +1059,58 @@ def generate_qc_report (context, cover, api_key, input) :
         # plt.show()  # if running interactively
 
         ##### PLOTTING DATA MISSINGNESS #####
-        missing_percent = 100 - data_missingness[list(subject_session_labels.values())].notna().mean()
 
-        plt.figure(figsize=(10, 6))
-        sns.barplot(x=missing_percent.values, y=[var for var in missing_percent.index],color="red")
-        plt.xlabel("% Missing", fontsize=12)
-        plt.xticks(fontsize=14)
-        
-        plt.title("Percentage of Missing Session Information", fontsize=14, fontweight="bold")
-        plt.xlim(0, 100)
+        cols = (list(subject_session_labels.keys()))[::-1]
+        labels = [subject_session_labels[col] for col in cols]
+
+        # Calculate percent present and missing
+        present_percent = (data_completeness[cols] == 1).mean() * 100
+        missing_percent = 100 - present_percent
+
+        # Stack data for bars
+        bar_widths = np.vstack([present_percent.values, missing_percent.values])
+
+        # Plot
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.barh(
+            y=np.arange(len(cols)),
+            width=bar_widths[0],
+            color="green",
+            label="% Present"
+        )
+        ax.barh(
+            y=np.arange(len(cols)),
+            width=bar_widths[1],
+            left=bar_widths[0],
+            color="red",
+            label="% Missing"
+        )
+
+        # Y-axis tick order matches `cols`
+        ax.set_yticks(np.arange(len(cols)))
+        print(cols)
+        ax.set_yticklabels(labels, fontsize=14)
+
+        # Format axes
+        ax.set_xlim(0, 100)
+        ax.set_xlabel("Percentage", fontsize=12)
+        ax.set_title("Session Information Completeness", fontsize=14, fontweight="bold")
+        ax.legend(
+            fontsize=12,
+            bbox_to_anchor=(1.01, 1),
+            loc='upper left',
+            borderaxespad=0
+        )
+        ax.tick_params(axis='x', labelsize=14)
+
+        # Save
         plt.tight_layout()
-        plt.tick_params(axis='both', labelsize=14)
-
         data_comleteness_path = os.path.join(work_dir,"data_completeness.png")
         plt.savefig(data_comleteness_path,dpi=200, bbox_inches='tight')
-        #plt.show()
-
 
         #Saving failed analyses
         failed_analyses.to_csv(os.path.join(out_dir,"Sessions_failed_analyses.csv"),index=False)
-        data_missingness.to_csv(os.path.join(out_dir,"SessionData_Missingness.csv"),index=False)
+        data_completeness.to_csv(os.path.join(out_dir,"SessionData_Missingness.csv"),index=False)
 
         return table_path,acq_time_plot_path, acquisition_plot_path, data_comleteness_path, asysplot_path, summary
     

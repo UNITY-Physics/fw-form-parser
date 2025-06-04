@@ -1,0 +1,34 @@
+metadata_template : {
+    "age_at_scan_months": 0,  # Age in months
+    "gestational_age_weeks": 0,  # Gestational age in weeks
+    "sex_at_birth": None,  # "Male" / "Female" / "Other"
+    "birth_weight_kg": 0,  # Birth weight in kilograms
+    "birth_length_cm": 0,  # Birth length in centimeters
+    "birth_hc_cm" : 0, #Birth head circumference cm
+
+    "family_size_at_scan": 0,  # Integer count
+    "num_children_in_family": 0,  # Integer count
+    "num_children_in_household": 0, 
+    "num_adults_in_household": 0,
+
+    "birth_order": 0,  # Integer (1 = firstborn, etc.)
+    "current_height_cm": 0,  # Height in centimeters
+    "current_weight_kg": 0,  # Weight in kilograms
+    "current_hc_cm": 0,  # Head circumference in centimeters
+    "country_of_birth": None,  # String
+    "city_of_birth": None,  # String
+    "child_ethnicity": None ,
+    "child_race": None,
+    "child_religion": None ,
+    "child_caste": None,
+
+    "maternal_age_at_birth": 0,  # Age in years
+    "maternal_education_years": 0,  # String (e.g., "High School", "Bachelor’s")
+    
+    "father_owns_cellphone": False,  # Boolean (True/False)
+    "mother_owns_cellphone": False,  # Boolean (True/False)
+    "child_health_group": [],  # List of categories (e.g., ["Healthy", "Anemia"])
+    "gsed_composite_score": 0,  # Numeric score
+    "gsed_psychosocial_score": 0,  # Numeric score
+    "gsed_daz": 0  # Numeric score
+}

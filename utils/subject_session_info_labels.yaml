@@ -15,7 +15,7 @@ subject_session_labels : {
         "birth_order": "Birth Ordinal",
         "current_height_cm": "Height at scan",
         "current_weight_kg": "Weight at scan",
-        "current_head_circumference_cm": "Head Circumference at scan (measured)",
+        "current_hc_cm": "Head Circumference at scan (measured)",
         "country_of_birth": "Country of Birth / Home",
         "city_of_birth": "City of Birth / Home",
 

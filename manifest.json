@@ -26,7 +26,7 @@
     },
     "gear-builder": {
       "category": "analysis",
-      "image": "flywheel/form-parser:0.1.24"
+      "image": "flywheel/form-parser:0.1.26"
     },
     "kcl-app-binary": "app/main.sh",
     "kcl-app-modalities": [
@@ -62,5 +62,5 @@
   "name": "form-parser",
   "source": "",
   "url": "https://github.com/UNITY-Physics/fw-form-parser/tree/main",
-  "version": "0.1.24"
+  "version": "0.1.26"
 }
