@@ -24,6 +24,7 @@ from reportlab.lib.utils import ImageReader
 from PyPDF2 import PdfMerger
 from PIL import Image
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 
@@ -70,6 +71,166 @@ custom_style = ParagraphStyle(name="CustomStyle", parent=styleN,
 
 global user
 global project_label
+
+def process_task(task_df, fw):
+
+    
+    # Preallocate variables
+    axi = None
+    cor = None
+    sag = None
+    t2_qc = None
+
+    # then iterate over the rows of the filtered dataframe
+
+    for index, row, in task_df.iterrows():
+        # pull the acquisition object from the API
+        acquisition_id = row['acquisition.id']
+        try:
+            acquisition = fw.get_acquisition(acquisition_id)
+        except flywheel.ApiException as e:
+            log.error(f'Error getting acquisition: {e}')
+            continue
+
+        if row['Question'] == "quality" and row['Answer'] == 0:
+            log.info(f"QC-passed {row['Subject Label']} {row['Acquisition Label']} {row['acquisition.id']}")
+            
+            # Set the orientation variable for later use in the session QC
+            if 'AXI' in row['Acquisition Label'] or 'axi' in row['Acquisition Label']:
+                axi = 'pass'
+            elif 'COR' in row['Acquisition Label'] or 'cor' in row['Acquisition Label']:
+                cor = 'pass'
+            elif 'SAG' in row['Acquisition Label'] or 'sag' in row['Acquisition Label']:
+                sag = 'pass'
+            
+            try:
+                # Add a tag to a acquisition
+                acquisition.add_tag('QC-passed')
+                acquisition.delete_tag('read')
+
+
+            except flywheel.ApiException as e:
+                log.error(f'Error adding tag to acquisition: {e}')
+
+            try:
+                # Add a tag to the file
+                for file in acquisition.files:
+                    if file.name.endswith('nii.gz'):
+                        file_id = file.file_id
+                        break
+                
+                file = fw.get_file(file_id)
+                file.add_tag('QC-passed')
+
+            except flywheel.ApiException as e:
+                log.error(f'Error adding tag to file: {e}')
+
+
+        elif row['Question'] == "quality" and row['Answer'] == 1:
+            log.info(f"QC-unclear {row['Subject Label']} {row['Acquisition Label']} {row['acquisition.id']}")
+            
+            # Set the orientation variable for later use in the session QC
+            if 'AXI' in row['Acquisition Label'] or 'axi' in row['Acquisition Label']:
+                axi = 'unclear'
+            elif 'COR' in row['Acquisition Label'] or 'cor' in row['Acquisition Label']:
+                cor = 'unclear'
+            elif 'SAG' in row['Acquisition Label'] or 'sag' in row['Acquisition Label']:
+                sag = 'unclear'
+            
+            try:
+                # Add a tag to a acquisition
+                acquisition.add_tag('QC-unclear')
+                acquisition.delete_tag('read')
+
+            except flywheel.ApiException as e:
+                log.error(f'Error adding tag to acquisition: {e}')
+
+            try:
+                # Add a tag to the file
+                for file in acquisition.files:
+                    if file.name.endswith('nii.gz'):
+                        file_id = file.file_id
+                        break
+                    
+                file = fw.get_file(file_id)
+                file.add_tag('QC-unclear')
+            except flywheel.ApiException as e:
+                log.error(f'Error adding tag to file: {e}')
+
+        elif row['Question'] == "quality" and row['Answer'] == 2:
+            log.info(f"QC-failed {row['Subject Label']} {row['Acquisition Label']} {row['acquisition.id']}")
+            
+            # Set the orientation variable for later use in the session QC
+            if 'AXI' in row['Acquisition Label'] or 'axi' in row['Acquisition Label']:
+                axi = 'fail'
+            elif 'COR' in row['Acquisition Label'] or 'cor' in row['Acquisition Label']:
+                cor = 'fail'
+            elif 'SAG' in row['Acquisition Label'] or 'sag' in row['Acquisition Label']:
+                sag = 'fail'
+
+            try:
+                # Add a tag to a acquisition
+                acquisition.add_tag('QC-failed')
+                acquisition.delete_tag('read')
+
+            except flywheel.ApiException as e:
+                log.error(f'Error adding tag to acquisition: {e}')
+
+            try:
+                # Add a tag to the file
+                for file in acquisition.files:
+                    if file.name.endswith('nii.gz'):
+                        file_id = file.file_id
+                        break
+                    
+                file = fw.get_file(file_id)
+                file.add_tag('QC-failed')
+            except flywheel.ApiException as e:
+                log.error(f'Error adding tag to file: {e}')
+
+        # Check if all the three orientations have passed QC
+        # Add a tag to a session [T2w_QC_passed, T2w_QC_failed, T2w_QC_unclear]
+        if axi == 'pass' and cor == 'pass' and sag == 'pass':
+            log.info(f"T2w QC passed {row['Subject Label']}")
+            t2_qc = 'pass'
+            session_id = row['session.id']
+            session = fw.get_session(session_id)
+            try:
+                # Add a tag to a session
+                session.add_tag('T2w_QC_passed')
+            except flywheel.ApiException as e:
+                    log.error(f'Error adding tag to session: {e}')
+        elif axi == 'fail' or cor == 'fail' or sag == 'fail':
+            log.info(f"T2w QC failed {row['Subject Label']}")
+            t2_qc = 'fail'
+            session_id = row['session.id']
+            session = fw.get_session(session_id)
+            try:
+                # Add a tag to a session
+                session.add_tag('T2w_QC_failed')
+            except flywheel.ApiException as e:
+                    log.error(f'Error adding tag to session: {e}')
+        elif axi == 'unclear' or cor == 'unclear' or sag == 'unclear':
+            log.info(f"T2w QC unclear {row['Subject Label']}")
+            t2_qc = 'unclear'
+            session_id = row['session.id']
+            session = fw.get_session(session_id)
+            try:
+                # Add a tag to a session
+                session.add_tag('T2w_QC_unclear')
+            except flywheel.ApiException as e:
+                    log.error(f'Error adding tag to session: {e}')
+        
+        # Append the results to the preallocated lists
+        print("***")
+        print("Visual QC report for subject: ", row['Subject Label'], "session: ", row['Session Label'])
+        print("T2w_axi: ", axi, "T2w_cor: ", cor, "T2w_sag: ", sag, "T2w_all: ", t2_qc)
+        print("***")
+        
+    # same logic you had per task_id
+    # move code from your for-loop here
+    pass  # implement your tagging logic here
+
 
 def run_tagger(context, api_key):
 
@@ -141,7 +302,23 @@ def run_tagger(context, api_key):
     file_object[0].download(download_path)
     df = pd.read_csv(download_path)
 
+    df = pd.read_csv(download_path)
+    task_ids = df['Session Label'].unique()
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = []
+        for task_id in task_ids:
+            task_df = df[df['Session Label'] == task_id]
+            futures.append(executor.submit(process_task, task_df.copy(), fw))
+
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                log.error(f"Error in parallel execution: {e}")
+                
     # start by filtering by unique task_id
+    '''
     for task_id in df['Session Label'].unique():
         task_df = df[df['Session Label'] == task_id]
 
@@ -296,6 +473,8 @@ def run_tagger(context, api_key):
             print("Visual QC report for subject: ", row['Subject Label'], "session: ", row['Session Label'])
             print("T2w_axi: ", axi, "T2w_cor: ", cor, "T2w_sag: ", sag, "T2w_all: ", t2_qc)
             print("***")
+    
+    '''
     return 0
 
 
@@ -866,8 +1045,8 @@ def generate_qc_report (context, cover, api_key, input) :
                 # Fill in 1 for present, 0 for missing
                 for metadata in subject_session_labels.keys():
                     value = session.info.get(metadata, None)
-                    print(subject_label, session_label, metadata, value)
-                    if value is None or value == "" or value == "Not Found" or default.get(metadata):
+                    #print(subject_label, session_label, metadata, value)
+                    if value is None or value == "" or value == "Not Found" or value == default.get(metadata):
                         row[metadata] = 0
                     else:
                         row[metadata] = 1
