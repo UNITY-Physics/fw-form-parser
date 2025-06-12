@@ -121,6 +121,7 @@ def process_task(task_df, fw):
                 
                 file = fw.get_file(file_id)
                 file.add_tag('QC-passed')
+                file.delete_tag('read')
 
             except flywheel.ApiException as e:
                 log.error(f'Error adding tag to file: {e}')
@@ -154,6 +155,8 @@ def process_task(task_df, fw):
                     
                 file = fw.get_file(file_id)
                 file.add_tag('QC-unclear')
+                file.delete_tag('read')
+
             except flywheel.ApiException as e:
                 log.error(f'Error adding tag to file: {e}')
 
@@ -185,6 +188,7 @@ def process_task(task_df, fw):
                     
                 file = fw.get_file(file_id)
                 file.add_tag('QC-failed')
+                file.delete_tag('read')
             except flywheel.ApiException as e:
                 log.error(f'Error adding tag to file: {e}')
 
