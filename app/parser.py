@@ -17,7 +17,8 @@ def parse_config(
         Tuple of api_key
     """
     api_key = gear_context.get_input("api-key").get("key")
-
-    return api_key
+    cde_dict = gear_context.get_input_path("cde-dictionary") 
+    
+    return api_key, cde_dict
 
 

@@ -26,7 +26,7 @@
     },
     "gear-builder": {
       "category": "analysis",
-      "image": "flywheel/form-parser:0.1.28"
+      "image": "flywheel/form-parser:0.1.29"
     },
     "kcl-app-binary": "app/main.sh",
     "kcl-app-modalities": [
@@ -54,6 +54,11 @@
     "api-key": {
       "base": "api-key",
       "read-only": true
+    },
+    "cde-dictionary": {
+      "base": "file",
+      "description": "CDE Dictionary JSON containing the categories and associated metafields.",
+      "optional": true
     }
   },
   "label": "form-parser",
@@ -62,5 +67,5 @@
   "name": "form-parser",
   "source": "",
   "url": "https://github.com/UNITY-Physics/fw-form-parser/tree/main",
-  "version": "0.1.28"
+  "version": "0.1.29"
 }
