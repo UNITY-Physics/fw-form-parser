@@ -8,7 +8,7 @@ from flywheel_gear_toolkit import GearToolkitContext
 from app.parser import parse_config
 from app.main import run_tagger
 from app.main import run_csv_parser
-from app.main import generate_full_qc_report_platypus, create_cover_page
+from app.main import generate_full_qc_report, create_cover_page
 
 # Set up logging
 log = logging.getLogger(__name__)
@@ -25,13 +25,13 @@ def main(context: GearToolkitContext) -> None:
 
 
         # Run the tagger function
-        #e_code = run_tagger(context, api_key)
+        qc_done = run_tagger(context, api_key)
         out_dir = '/flywheel/v0/output'
         work_dir = '/flywheel/v0/work'
         output = os.path.join(out_dir,output)
         # Run the pdf report function
         cover = create_cover_page (context, api_key, work_dir)
-        e_code = generate_full_qc_report_platypus(context, cover, api_key, output, cde_dict)
+        e_code = generate_full_qc_report(context, cover, api_key, output, cde_dict, qc_done)
 
 
     except (TimeoutError, requests.exceptions.ConnectionError) as exc:

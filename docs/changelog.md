@@ -1,4 +1,8 @@
 # Changelog
+28/07/2025
+"version": "0.1.32"
+This version should be the the upgraded working version of the gear. It outputs missingness based on the dictionary uploaded, outputs QCing outcomes and a quantitative project summary.
+The label has also been changed to be more informative.
 
 29/07/2024
 "version": "0.1.3"

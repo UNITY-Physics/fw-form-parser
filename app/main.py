@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 import pytz
 import yaml
 import math
-
+import markdown
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -74,6 +74,20 @@ custom_style = ParagraphStyle(name="CustomStyle", parent=styleN,
 
 global user
 global project_label
+
+
+def convert_markdown_to_html(markdown_text):
+    """Convert markdown text to HTML that ReportLab can understand."""
+    
+    # Convert markdown to HTML
+    html = markdown.markdown(markdown_text, extensions=['extra'])
+    
+    # Clean up the HTML for ReportLab compatibility
+    # Remove any <html>, <body>, <head> tags that markdown might add
+    html = re.sub(r'<html>|</html>|<body>|</body>|<head>.*?</head>', '', html, flags=re.DOTALL)
+    
+    return html
+
 
 def process_task(task_df, fw):
 
@@ -270,7 +284,7 @@ def run_tagger(context, api_key):
     gear_to_find = gear.strip()  # Assuming 'gear' is the gear name you're looking for
   
     filtered_gear_runs =[]
-
+    file_object = None
     for run in analyses:
         try:
             if run is not None and run.get('gear_info') is None and gear in run.label:
@@ -290,6 +304,9 @@ def run_tagger(context, api_key):
     if latest_gear_run is not None:
         file_object = latest_gear_run.files
         #log.info(f"File object:  {file_object[0].name}")
+    else:
+        log.error(f"{gear} was not run.")
+        return 0
 
     # Create a work directory in our local "home" directory
     work_dir = Path('/flywheel/v0/work', platform='auto')
@@ -303,6 +320,7 @@ def run_tagger(context, api_key):
     if not out_dir.exists():
         out_dir.mkdir(parents = True)
 
+    
     print("*** FILE OBJECT ***", len(file_object))
 
     download_path = work_dir/file_object[0].name
@@ -312,7 +330,7 @@ def run_tagger(context, api_key):
     df = pd.read_csv(download_path)
     task_ids = df['Session Label'].unique()
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         futures = []
         for task_id in task_ids:
             task_df = df[df['Session Label'] == task_id]
@@ -323,166 +341,8 @@ def run_tagger(context, api_key):
                 future.result()
             except Exception as e:
                 log.error(f"Error in parallel execution: {e}")
-                
-    # start by filtering by unique task_id
-    '''
-    for task_id in df['Session Label'].unique():
-        task_df = df[df['Session Label'] == task_id]
-
-        # Preallocate variables
-        axi = None
-        cor = None
-        sag = None
-        t2_qc = None
-
-        # then iterate over the rows of the filtered dataframe
-
-        for index, row, in task_df.iterrows():
-            # pull the acquisition object from the API
-            acquisition_id = row['acquisition.id']
-            try:
-                acquisition = fw.get_acquisition(acquisition_id)
-            except flywheel.ApiException as e:
-                log.error(f'Error getting acquisition: {e}')
-                continue
-
-            if row['Question'] == "quality" and row['Answer'] == 0:
-                log.info(f"QC-passed {row['Subject Label']} {row['Acquisition Label']} {row['acquisition.id']}")
-                
-                # Set the orientation variable for later use in the session QC
-                if 'AXI' in row['Acquisition Label'] or 'axi' in row['Acquisition Label']:
-                    axi = 'pass'
-                elif 'COR' in row['Acquisition Label'] or 'cor' in row['Acquisition Label']:
-                    cor = 'pass'
-                elif 'SAG' in row['Acquisition Label'] or 'sag' in row['Acquisition Label']:
-                    sag = 'pass'
-                
-                try:
-                    # Add a tag to a acquisition
-                    acquisition.add_tag('QC-passed')
-                    acquisition.delete_tag('read')
-
-
-                except flywheel.ApiException as e:
-                    log.error(f'Error adding tag to acquisition: {e}')
-
-                try:
-                    # Add a tag to the file
-                    for file in acquisition.files:
-                        if file.name.endswith('nii.gz'):
-                            file_id = file.file_id
-                            break
-                    
-                    file = fw.get_file(file_id)
-                    file.add_tag('QC-passed')
-
-                except flywheel.ApiException as e:
-                    log.error(f'Error adding tag to file: {e}')
-
-
-            elif row['Question'] == "quality" and row['Answer'] == 1:
-                log.info(f"QC-unclear {row['Subject Label']} {row['Acquisition Label']} {row['acquisition.id']}")
-                
-                # Set the orientation variable for later use in the session QC
-                if 'AXI' in row['Acquisition Label'] or 'axi' in row['Acquisition Label']:
-                    axi = 'unclear'
-                elif 'COR' in row['Acquisition Label'] or 'cor' in row['Acquisition Label']:
-                    cor = 'unclear'
-                elif 'SAG' in row['Acquisition Label'] or 'sag' in row['Acquisition Label']:
-                    sag = 'unclear'
-                
-                try:
-                    # Add a tag to a acquisition
-                    acquisition.add_tag('QC-unclear')
-                    acquisition.delete_tag('read')
-
-                except flywheel.ApiException as e:
-                    log.error(f'Error adding tag to acquisition: {e}')
-
-                try:
-                    # Add a tag to the file
-                    for file in acquisition.files:
-                        if file.name.endswith('nii.gz'):
-                            file_id = file.file_id
-                            break
-                        
-                    file = fw.get_file(file_id)
-                    file.add_tag('QC-unclear')
-                except flywheel.ApiException as e:
-                    log.error(f'Error adding tag to file: {e}')
-
-            elif row['Question'] == "quality" and row['Answer'] == 2:
-                log.info(f"QC-failed {row['Subject Label']} {row['Acquisition Label']} {row['acquisition.id']}")
-                
-                # Set the orientation variable for later use in the session QC
-                if 'AXI' in row['Acquisition Label'] or 'axi' in row['Acquisition Label']:
-                    axi = 'fail'
-                elif 'COR' in row['Acquisition Label'] or 'cor' in row['Acquisition Label']:
-                    cor = 'fail'
-                elif 'SAG' in row['Acquisition Label'] or 'sag' in row['Acquisition Label']:
-                    sag = 'fail'
-
-                try:
-                    # Add a tag to a acquisition
-                    acquisition.add_tag('QC-failed')
-                    acquisition.delete_tag('read')
-
-                except flywheel.ApiException as e:
-                    log.error(f'Error adding tag to acquisition: {e}')
-
-                try:
-                    # Add a tag to the file
-                    for file in acquisition.files:
-                        if file.name.endswith('nii.gz'):
-                            file_id = file.file_id
-                            break
-                        
-                    file = fw.get_file(file_id)
-                    file.add_tag('QC-failed')
-                except flywheel.ApiException as e:
-                    log.error(f'Error adding tag to file: {e}')
-
-            # Check if all the three orientations have passed QC
-            # Add a tag to a session [T2w_QC_passed, T2w_QC_failed, T2w_QC_unclear]
-            if axi == 'pass' and cor == 'pass' and sag == 'pass':
-                log.info(f"T2w QC passed {row['Subject Label']}")
-                t2_qc = 'pass'
-                session_id = row['session.id']
-                session = fw.get_session(session_id)
-                try:
-                    # Add a tag to a session
-                    session.add_tag('T2w_QC_passed')
-                except flywheel.ApiException as e:
-                        log.error(f'Error adding tag to session: {e}')
-            elif axi == 'fail' or cor == 'fail' or sag == 'fail':
-                log.info(f"T2w QC failed {row['Subject Label']}")
-                t2_qc = 'fail'
-                session_id = row['session.id']
-                session = fw.get_session(session_id)
-                try:
-                    # Add a tag to a session
-                    session.add_tag('T2w_QC_failed')
-                except flywheel.ApiException as e:
-                        log.error(f'Error adding tag to session: {e}')
-            elif axi == 'unclear' or cor == 'unclear' or sag == 'unclear':
-                log.info(f"T2w QC unclear {row['Subject Label']}")
-                t2_qc = 'unclear'
-                session_id = row['session.id']
-                session = fw.get_session(session_id)
-                try:
-                    # Add a tag to a session
-                    session.add_tag('T2w_QC_unclear')
-                except flywheel.ApiException as e:
-                        log.error(f'Error adding tag to session: {e}')
-            
-            # Append the results to the preallocated lists
-            print("***")
-            print("Visual QC report for subject: ", row['Subject Label'], "session: ", row['Session Label'])
-            print("T2w_axi: ", axi, "T2w_cor: ", cor, "T2w_sag: ", sag, "T2w_all: ", t2_qc)
-            print("***")
     
-    '''
-    return 0
+    return 1
 
 
 def run_csv_parser(context, api_key):
@@ -497,9 +357,19 @@ def run_csv_parser(context, api_key):
         int: The exit code.
     """
 
-    # Step 1: Setup env and read the CSV
-    # client = FWClient(api_key=api_key)
-    # fw = flywheel.Client(api_key=api_key)
+    # Create a work directory in our local "home" directory
+    work_dir = Path('/flywheel/v0/work', platform='auto')
+    out_dir = Path('/flywheel/v0/output', platform='auto')
+
+    # If it doesn't exist, create it
+    if not work_dir.exists():
+        work_dir.mkdir(parents = True)
+
+    # If it doesn't exist, create it
+    if not out_dir.exists():
+        out_dir.mkdir(parents = True)
+
+    
 
     # Get the destination container and project ID
 
@@ -539,33 +409,45 @@ def run_csv_parser(context, api_key):
         file_object = latest_gear_run.files
         log.info(f"File object: {file_object[0].name}")
 
-    # Create a work directory in our local "home" directory
-    work_dir = Path('/flywheel/v0/work', platform='auto')
-    out_dir = Path('/flywheel/v0/output', platform='auto')
+        download_path = work_dir/file_object[0].name
+        try:
+            file_object[0].download(download_path)
+            log.info(f"Downloaded the file {download_path}")
+        except Exception as e:
+            log.info(f"Caught exception {e}")
+        raw_df = pd.read_csv(download_path)
+        
+        log.info(f"Unique subjecst: {raw_df['Subject Label'].nunique()}")
 
-    # If it doesn't exist, create it
-    if not work_dir.exists():
-        work_dir.mkdir(parents = True)
+        # Step 2: Select columns by name
+        df = raw_df[['Project Label', 'Subject Label', 'Session Label', 'Session Timestamp','Acquisition Label', 'Question', 'Answer']]
+    
+    else:
+        log.error(f"{gear_to_find} was not run.")
+        log.info("No file was downloaded, getting all acquisitions in the current project.")
+        # Get all sessions in the project
+        sessions = project_container.sessions()
+        acquisitions = []
 
-    # If it doesn't exist, create it
-    if not out_dir.exists():
-        out_dir.mkdir(parents = True)
+        for session in sessions:
+            for acquisition in session.acquisitions():
+                acquisitions.append({
+                    'Project Label': project_container.label,
+                    'Subject Label': session.subject.label,
+                    'Session Label': session.label,
+                    'Session Timestamp': session.timestamp,
+                    'Acquisition Label': acquisition.label,
+                    'Question': '',
+                    'Answer': ''
+                })
+
+        df = pd.DataFrame(acquisitions)
+        df.to_csv('/flywheel/v0/work/filtered_file.csv', index=False)
+
+        return (0, os.path.join(context.output_dir, 'filtered_file.csv'))
 
     
-    download_path = work_dir/file_object[0].name
-    try:
-        file_object[0].download(download_path)
-        log.info(f"Downloaded the file {download_path}")
-    except Exception as e:
-        log.info(f"Caught exception {e}")
-    raw_df = pd.read_csv(download_path)
-    
-    log.info(f"Unique subjecst: {raw_df['Subject Label'].nunique()}")
-
-
-    # Step 2: Select columns by name
-    df = raw_df[['Project Label', 'Subject Label', 'Session Label', 'Session Timestamp','Acquisition Label', 'Question', 'Answer']]
-
+        
     # Step 3: Save the filtered DataFrame to a new CSV (optional)
     df.to_csv('/flywheel/v0/work/filtered_file.csv', index=False)
 
@@ -693,7 +575,11 @@ def create_cover_page (context, api_key, output_dir):
     global user
 
     fw = flywheel.Client(api_key=api_key)
-    user = f"{fw.get_current_user().firstname} {fw.get_current_user().lastname} [{fw.get_current_user().email}]"
+    try:
+        user = f"{fw.get_current_user().firstname} {fw.get_current_user().lastname} [{fw.get_current_user().email}]"
+    except Exception as e:
+        log.info (f"Error getting user information: {e}")
+        user="System"
 
     # Get the destination container and project ID
     destination_container = context.client.get_analysis(context.destination["id"])
@@ -707,6 +593,7 @@ def create_cover_page (context, api_key, output_dir):
     project  = fw.projects.find_one(f'label={project_label}')
     project = project.reload()
     project_description = project.description.replace('\n','<br/>') 
+    project_description = convert_markdown_to_html(project_description) if project_description else ""
 
     log.info(f"Project Label: {project_label}")
     filename = 'cover_page'
@@ -1343,13 +1230,16 @@ def acquisition_trends(fw, cde_dict):
         ax.tick_params(axis='x', labelsize=14)
 
        
-    handles, labels = ax.get_legend_handles_labels()
-    fig.legend(
-        handles, labels,
-        loc='upper left',
-        bbox_to_anchor=(1, 1),
-        fontsize=12
-    )
+    # Create a single legend for the entire figure using the first subplot's handles
+    if len(cde_data.keys()) > 0:
+        first_ax = axes[0] if hasattr(axes, '__iter__') else axes
+        handles, labels = first_ax.get_legend_handles_labels()
+        fig.legend(
+            handles, labels,
+            loc='upper left',
+            bbox_to_anchor=(1, 1),
+            fontsize=12
+        )
     #plt.suptitle("Categorised Session Information Completeness", fontsize=14, fontweight="semibold")
     plt.tight_layout()
     data_comleteness_path = os.path.join(work_dir,"data_completeness.png")
@@ -1633,7 +1523,7 @@ def qc_barplot(contrast, df):
                     ax[0].text(
                         i,
                         bottom[i] + val / 2,  # Position text in the middle of the stack
-                        f"{pivot_percentages[category][i]:.1f}%",
+                        f"{pivot_percentages.iloc[i][category]:.1f}%",
                         ha="center",
                         va="center",
                         fontsize=10,
@@ -1734,7 +1624,7 @@ def qc_barplot(contrast, df):
 
         # Plot as a bar chart
         
-        sns.barplot(data=failure_df, x="Artifact", y="Failure Rate (%)",ax=ax[0],  palette="coolwarm")
+        sns.barplot(data=failure_df, x="Artifact", y="Failure Rate (%)",ax=ax[0],  palette="coolwarm",hue="Artifact", legend=False)
         ax[0].set_title(f"Failure Rates by Artifact Type ({contrast})", fontsize=16,pad=20)
         ax[0].set_xlabel("Artifact Type", fontsize=12)
         ax[0].set_ylabel("Failure Rate (%)", fontsize=12)
@@ -1760,7 +1650,7 @@ def qc_barplot(contrast, df):
 
         return plot_path_qc, plot_path_artifacts
 
-def generate_full_qc_report_platypus(context, cover, api_key, input, cde_dict):
+def generate_full_qc_report(context, cover, api_key, input, cde_dict,qc_done):
     """
     Platypus-based QC report generator. Follows the logic of generate_qc_report_old:
     - Generates plots/tables, saves their paths, and adds them as Platypus flowables in the correct order.
@@ -1770,7 +1660,12 @@ def generate_full_qc_report_platypus(context, cover, api_key, input, cde_dict):
     """
 
     fw = flywheel.Client(api_key=api_key)
-    user = f"{fw.get_current_user().firstname} {fw.get_current_user().lastname} [{fw.get_current_user().email}]"
+    try:
+        user = f"{fw.get_current_user().firstname} {fw.get_current_user().lastname} [{fw.get_current_user().email}]"
+    except Exception as e:
+        log.info(f"Error getting user info: {e}")
+        user = "System"
+        
     destination_container = context.client.get_analysis(context.destination["id"])
     dest_proj_id = destination_container.parents["project"]
     project_container = context.client.get(dest_proj_id)
@@ -1786,8 +1681,7 @@ def generate_full_qc_report_platypus(context, cover, api_key, input, cde_dict):
     formatted_timestamp = current_timestamp.strftime('%Y-%m-%d_%H-%M-%S')
     final_report = os.path.join(out_dir,f"qc_report_{formatted_timestamp}.pdf")
     report =  os.path.join(work_dir,f"data_report.pdf")
-   # --- Data Preparation ---
-    df = pd.read_csv(os.path.join(input))
+    
 
     # --- Generate and Add Plots/Tables in the Same Order as Old Logic ---
     # 1. Acquisition Trends (summary table, acquisition plot, data completeness, asys plot)
@@ -1868,7 +1762,9 @@ def generate_full_qc_report_platypus(context, cover, api_key, input, cde_dict):
     # --- Add Compeleted Acquisition Plot ---
     if os.path.exists(acquisition_plot_path):
         log.info(f"Path exists {acquisition_plot_path}")
+        elements.append(Paragraph("<b>Number of Acquisitions</b>", styles['Heading2']))
         width, height = scale_image(acquisition_plot_path, 500, 400)
+        elements.append(Spacer(1, 24))
         elements.append(Image(acquisition_plot_path, width=width, height=height))
         elements.append(Spacer(1, 12))
     else:
@@ -1878,28 +1774,38 @@ def generate_full_qc_report_platypus(context, cover, api_key, input, cde_dict):
     
     # --- Add QC Barplots and Artifact Failure Barplots for each contrast ---
     contrasts = ["T1", "T2"]
-    for contrast in contrasts:
-        qc_barplot_path, artifact_barplot_path = qc_barplot(contrast, df)
+    if qc_done:
+        # --- Data Preparation ---
+        df = pd.read_csv(os.path.join(input))
 
-        if qc_barplot_path is not None and os.path.exists(qc_barplot_path):
-            log.info(f"Path exists {qc_barplot_path}")
-            elements.append(Paragraph(f"<b>QC Stacked Barplot ({contrast})</b>", styles['Heading2']))
-            width, height = scale_image(qc_barplot_path, 400, 300)
-            elements.append(Image(qc_barplot_path, width=width, height=height))
-            elements.append(Spacer(1, 12))
-        else:
-            log.warning(f"QC barplot for {contrast} not found at {qc_barplot_path}")
-        if os.path.exists(artifact_barplot_path):
-            log.info(f"Path exists {artifact_barplot_path}")
-            elements.append(Paragraph(f"<b>Artifact Failure Barplot ({contrast})</b>", styles['Heading2']))
-            width, height = scale_image(artifact_barplot_path, 400, 300)
-            elements.append(Image(artifact_barplot_path, width=width, height=height))
-            elements.append(Spacer(1, 12))
-        else:
-            log.warning(f"Artifact failure barplot for {contrast} not found at {artifact_barplot_path}")
+        for contrast in contrasts:
+            qc_barplot_path, artifact_barplot_path = qc_barplot(contrast, df)
 
-        elements.append(PageBreak())
+            if qc_barplot_path is not None and os.path.exists(qc_barplot_path):
+                log.info(f"Path exists {qc_barplot_path}")
+                elements.append(Paragraph(f"<b>QC Stacked Barplot ({contrast})</b>", styles['Heading2']))
+                width, height = scale_image(qc_barplot_path, 400, 300)
+                elements.append(Image(qc_barplot_path, width=width, height=height))
+                elements.append(Spacer(1, 12))
+            else:
+                log.warning(f"QC barplot for {contrast} not found at {qc_barplot_path}")
 
+            if artifact_barplot_path is not None and os.path.exists(artifact_barplot_path):
+                log.info(f"Path exists {artifact_barplot_path}")
+                elements.append(Paragraph(f"<b>Artifact Failure Barplot ({contrast})</b>", styles['Heading2']))
+                width, height = scale_image(artifact_barplot_path, 400, 300)
+                elements.append(Image(artifact_barplot_path, width=width, height=height))
+                elements.append(Spacer(1, 12))
+                elements.append(PageBreak())
+            else:
+                log.warning(f"Artifact failure barplot for {contrast} not found at {artifact_barplot_path}")
+
+            
+    else:
+       
+
+
+        elements.append(Paragraph(f'<b>Quality Control of scans was not performed on this project.\n If you require help, please refer to our resource on the <a href="https://www.unity-mri.com/info/dataflow#h.e9i4ecx19zfg">Unity website</a>.</b>', styles['Heading2']))
     
    
     # --- Add Failures Over Time Plots for each contrast ---

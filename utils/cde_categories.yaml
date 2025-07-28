@@ -1,7 +1,7 @@
 Demographics : {
 
         "age_at_scan_months": "Age at scan (months)",
-        "gestational_age_weeks": "Gestation",
+        "gestational_age_weeks": "Gestation (weeks)",
         "sex_at_birth": "Child Sex at Birth",
         "birth_weight_kg": "Birth Weight",
         "birth_length_cm": "Birth Length",
