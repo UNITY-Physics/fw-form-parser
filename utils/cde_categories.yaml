@@ -1,38 +1,135 @@
 Demographics : {
 
-        "age_at_scan_months": "Age at scan (months)",
-        "gestational_age_weeks": "Gestation (weeks)",
-        "sex_at_birth": "Child Sex at Birth",
-        "birth_weight_kg": "Birth Weight",
-        "birth_length_cm": "Birth Length",
-        "birth_hc_cm" : "Birth HC",
-        "current_height_cm": "Height at scan",
-        "current_weight_kg": "Weight at scan",
-        "current_hc_cm": "HC at scan (measured)",
-        "estimated_hc_cm": "MRI Estimated HC"
+        # 'StudyID': 'Study ID',
+        # 'CohortName': 'Cohort Name',
+        'cohortLocation_city': 'Cohort City',
+        'cohortLocation_country': 'Cohort Country',
+        'MRI_fieldStrength': 'MRI Field Strength',
+        # 'studyTimepoint': 'Study Timepoint',
+        'mriCollectedAtTimepoint': 'MRI Collected at Timepoint',
+        'childTimepointAge_days': 'Child Age (days)',
+        'childTimepointAge_months': 'Child Age (months)',
+        'childTimepointHeight_inches': 'Height (in)',
+        'childTimepointHeight_cm': 'Height (cm)',
+        'childTimepointWeight_kgs': 'Weight (kg)',
+        'childTimepointHC_measured_cm': 'Head Circumference (measured)',
+        'childTimepointHC_MRI_cm': 'Head Circumference (MRI)',
+        'childHAZ': 'Child Height-for-Age Z',
+        'childBiologicalSex': 'Child Sex',
+        'childGestation_days': 'Gestation (days)',
+        'childGestation_weeks': 'Gestation (weeks)',
+        'childBirthWeight_lbs': 'Birth Weight (lbs)',
+        'childBirthWeight_kgs': 'Birth Weight (kg)',
+        'childBirthLength_cm': 'Birth Length (cm)',
+        'childBirthLength_inches': 'Birth Length (in)',
+        'childCountryOfBirth': 'Country of Birth',
+        'childCityOfBirth': 'City of Birth',
+        'childRace': 'Race',
+        'childEthnicity': 'Ethnicity',
+        'childReligion': 'Religion',
+        'childCaste': 'Caste',
+        'childBirthOrdinal': 'Birth Order',
+        'maternalAgeAtChildBirth_years': 'Maternal Age at Birth',
+        'timepointFamilySize': 'Family Size',
+        'timepoint_adultsLivingWithChild': 'Adults Living with Child',
+        'timepoint_otherChildrenLivingWithChild': 'Other Children in Home',
+
+        'other:childBMI': 'Child BMI',
+        'other:childWAZ': 'Child Weight-for-Age Z',
+        'other:BirthingLocation': 'Birthing Location',
 }
 
 SES : { 
-        "family_size_at_scan": "Family Size (at scan)",
-        "num_children_in_family": "Number of Children in Family",
-        "num_children_in_household": "Number of Children in Household",
-        "num_adults_in_household": "Number of Adults in Household",
-        "birth_order": "Birth Ordinal",
-        "country_of_birth": "Country of Birth / Home",
-        "city_of_birth": "City of Birth / Home",
-        "maternal_age_at_birth": "Maternal age at child birth",
-        "maternal_education_years": "Maternal education (yrs)",
-        "father_owns_cellphone": "Father owns a cell phone at scan",
-        "mother_owns_cellphone": "Mother owns a cell phone at scan"
+        'maternalEducation_HHS': 'Maternal Education (HHS)',
+        'maternalEducation_schoolingYears': 'Maternal Years of Schooling',
+        'childSES': 'Child SES',
+        'other:combinedSES': 'Combined SES',
+        'other:paternalEDU': 'Paternal Education (Other)',
+        'other:maternalEDU': 'Maternal Education (Other)'
         }
 
 Cognitive : { 
-        "child_health_group": "Child Health Grouping",
-        "gsed_psychosocial_score": "GSED Psychosocial Score",
-        "gsed_daz": "GSED DAZ Score",
-        "apgar_1_score": "APGAR 1",
-        "apgar_5_score": "APGAR 5",
-        "bayley_standard_cognitive": "Bayley Cognitive Score",
-        "bayley_standard_language": "Bayley Language Score",
-        "bayley_standard_motor": "Bayley Motor Score"
+       # GSED
+    'gsed_LongForm_DAZScore': 'GSED Long Form DAZ',
+    'gsed_ShortForm_DAZScore': 'GSED Short Form DAZ',
+
+    # MSEL
+    'msel_ELC': 'MSEL Early Learning Composite',
+    'msel_VDQ': 'MSEL Verbal DQ',
+    'msel_NVDQ': 'MSEL Nonverbal DQ',
+    'msel_FM_T': 'MSEL Fine Motor',
+    'msel_GM_T': 'MSEL Gross Motor',
+    'msel_EL_T': 'MSEL Expressive Language',
+    'msel_RL_T': 'MSEL Receptive Language',
+    'msel_VR_T': 'MSEL Visual Reception',
+
+    # BSID
+    'bsid_CCS': 'BSID Cognitive Composite',
+    'bsid_LCS': 'BSID Language Composite',
+    'bsid_MCS': 'BSID Motor Composite',
+    'bsid_cognitiveScaled': 'BSID Cognitive Scaled',
+    'bsid_receptiveLanguageScaled': 'BSID Receptive Language',
+    'bsid_expressiveLanguageScaled': 'BSID Expressive Language',
+    'bsid_fineMotorScaled': 'BSID Fine Motor',
+    'bsid_grossMotorScaled': 'BSID Gross Motor',
+    'bsid_adaptiveBehaviorScaled': 'BSID Adaptive Behavior',
+    'bsid_socioemotionalScaled': 'BSID Socioemotional',
+
+    # ASQ
+    'asq_Communication': 'ASQ Communication',
+    'asq_GrossMotor': 'ASQ Gross Motor',
+    'asq_FineMotor': 'ASQ Fine Motor',
+    'asq_ProblemSolving': 'ASQ Problem Solving',
+    'asq_SocialIssues': 'ASQ Social Issues',
+
+    # WPPSI
+    'wppsi_FSIQ': 'WPPSI FSIQ',
+    'wppsi_VCI': 'WPPSI Verbal Comp. Index',
+    'wppsi_VSI': 'WPPSI Visual-Spatial Index',
+    'wppsi_FRI': 'WPPSI Fluid Reasoning Index',
+    'wppsi_WMI': 'WPPSI Working Memory Index',
+    'wppsi_PSI': 'WPPSI Processing Speed Index',
+    'wppsi_bugSearchScales': 'WPPSI Bug Search',
+    'wppsi_cancellationScaled': 'WPPSI Cancellation',
+    'wppsi_pictureMemoryScaled': 'WPPSI Picture Memory',
+    'wppsi_zooScaled': 'WPPSI Zoo Locations',
+    'wppsi_blockDesignedScaled': 'WPPSI Block Design',
+    'wppsi_objectAssemblyScaled': 'WPPSI Object Assembly',
+    'wppsi_pictureConceptsScaled': 'WPPSI Picture Concepts',
+    'wppsi_matrixReasoningScaled': 'WPPSI Matrix Reasoning',
+    'wppsi_similaritiesScaled': 'WPPSI Similarities',
+    'wppsi_vocabularyScaled': 'WPPSI Vocabulary',
+
+    # WISC
+    'wisc_FSIQ': 'WISC FSIQ',
+    'wisc_VCI': 'WISC Verbal Comp. Index',
+    'wisc_VSI': 'WISC Visual-Spatial Index',
+    'wisc_FRI': 'WISC Fluid Reasoning Index',
+    'wisc_WMI': 'WISC Working Memory Index',
+    'wisc_PSI': 'WISC Processing Speed Index',
+    'wisc_similaritiesScaled': 'WISC Similarities',
+    'wisc_vocabScaled': 'WISC Vocabulary',
+    'wisc_BlockDesigScaled': 'WISC Block Design',
+    'wisc_visualPuzzlesScaled': 'WISC Visual Puzzles',
+    'wisc_matrixReasoningScaled': 'WISC Matrix Reasoning',
+    'wisc_figureWeightsScaled': 'WISC Figure Weights',
+    'wisc_digitSpanScaled': 'WISC Digit Span',
+    'wisc_pictureSpanScaled': 'WISC Picture Span',
+    'wisc_CodingScaled': 'WISC Coding',
+    'wisc_symbolSearchScaled': 'WISC Symbol Search',
+
+    # AAB
+    'aab_lwrScaled': 'AAB Letter-Word Recognition',
+    'aab_mcScaled': 'AAB Math Concepts'
+        }
+
+Other: {
+        'other:childBMI': 'Child BMI',
+        'other:childWAZ': 'Child Weight-for-Age Z',
+        'other:BirthingLocation': 'Birthing Location',
+        'other:combinedSES': "CombinedSES",
+        'other:paternalEDU': "PaternalSES",
+        'other:maternalEDU': "MaternalSES",
+        'apgar_1_score':"APGAR1 Score",
+        'apgar_5_score':"APGAR5 Score"
         }

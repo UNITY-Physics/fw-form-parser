@@ -27,8 +27,8 @@ from PyPDF2 import PdfMerger
 from reportlab.platypus import Image
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-
+import glob
+from fw_client import FWClient
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches 
@@ -122,8 +122,9 @@ def process_task(task_df, fw):
             
             try:
                 # Add a tag to a acquisition
-                acquisition.add_tag('QC-passed')
                 acquisition.delete_tag('read')
+                acquisition.add_tag('QC-passed')
+                
 
 
             except flywheel.ApiException as e:
@@ -137,8 +138,9 @@ def process_task(task_df, fw):
                         break
                 
                 file = fw.get_file(file_id)
-                file.add_tag('QC-passed')
                 file.delete_tag('read')
+                file.add_tag('QC-passed')
+                
 
             except flywheel.ApiException as e:
                 log.error(f'Error adding tag to file: {e}')
@@ -171,8 +173,9 @@ def process_task(task_df, fw):
                         break
                     
                 file = fw.get_file(file_id)
-                file.add_tag('QC-unclear')
                 file.delete_tag('read')
+                file.add_tag('QC-unclear')
+                
 
             except flywheel.ApiException as e:
                 log.error(f'Error adding tag to file: {e}')
@@ -190,8 +193,9 @@ def process_task(task_df, fw):
 
             try:
                 # Add a tag to a acquisition
-                acquisition.add_tag('QC-failed')
                 acquisition.delete_tag('read')
+                acquisition.add_tag('QC-failed')
+                
 
             except flywheel.ApiException as e:
                 log.error(f'Error adding tag to acquisition: {e}')
@@ -204,8 +208,9 @@ def process_task(task_df, fw):
                         break
                     
                 file = fw.get_file(file_id)
-                file.add_tag('QC-failed')
                 file.delete_tag('read')
+                file.add_tag('QC-failed')
+                
             except flywheel.ApiException as e:
                 log.error(f'Error adding tag to file: {e}')
 
@@ -271,6 +276,11 @@ def run_tagger(context, api_key):
     destination_container = context.client.get_analysis(context.destination["id"])
     # destination_container = context.client.get(context.destination["id"]) # Change in SDK 18.3.0
     dest_proj_id = destination_container.parents["project"]
+    project_container = context.client.get(dest_proj_id)
+    project_label = project_container.label
+
+    project  = fw.projects.find_one(f'label={project_label}')
+    project = project.reload()
 
     # Specify the gear name to search for
     gear='form-and-annotations-exporter'
@@ -305,7 +315,7 @@ def run_tagger(context, api_key):
         file_object = latest_gear_run.files
         #log.info(f"File object:  {file_object[0].name}")
     else:
-        log.error(f"{gear} was not run.")
+        log.error(f"{gear} was not run. Please run the {gear} first before running form-parser.")
         return 0
 
     # Create a work directory in our local "home" directory
@@ -320,8 +330,6 @@ def run_tagger(context, api_key):
     if not out_dir.exists():
         out_dir.mkdir(parents = True)
 
-    
-    print("*** FILE OBJECT ***", len(file_object))
 
     download_path = work_dir/file_object[0].name
     file_object[0].download(download_path)
@@ -560,12 +568,144 @@ def run_csv_parser(context, api_key):
     formatted_date = now.strftime("%Y-%m-%d_%H-%M-%S")
 
     # Step 9: Export the results to a CSV file
+    output_filename = f"parsed_qc_annotations_{formatted_date}.csv"
+    print("CONTEXT OUTPUT DIR", context.output_dir)
     if not merged_df.empty:
         log.info("Exporting annotations to CSV file.")
-        output_filename = f"parsed_qc_annotations_{formatted_date}.csv"
+        #output_filename = f"parsed_qc_annotations_{formatted_date}.csv"
         merged_df.to_csv(context.output_dir / output_filename, index=False)
     log.info(f'Parsed QC data saved to: {output_filename}')
     return (0, os.path.join(context.output_dir,output_filename))
+
+
+# def qc_completeness(context, api_key):
+
+#     fwclient = FWClient(
+#         api_key=api_key,
+#         timeout=100,
+#     )
+#     fw = flywheel.Client(api_key=api_key)
+
+#     protocol_label = 'QC'
+#     destination_container = context.client.get_analysis(context.destination["id"])
+
+#     dest_proj_id = destination_container.parents["project"]
+
+#     project_container = context.client.get(dest_proj_id)
+#     project_label = project_container.label
+
+#     project  = fw.projects.find_one(f'label={project_label}')
+#     project = project.reload()
+
+
+    # protocol_filter = f"parents.project={dest_proj_id}"
+    # if protocol_label:
+    #     protocol_filter += f",label={protocol_label}"
+
+    # protocol = fwclient.get(
+    #     f"/api/read_task_protocols?filter=parents.project={dest_proj_id},label={protocol_label}"
+    # ).get("results")[0]
+
+    # my_filter = f"protocol_id={protocol._id},status=Complete"
+    # reader_tasks_complete = fwclient.get(f"/api/readertasks/project/{dest_proj_id}?filter={my_filter}").to_flat().get("results")
+    
+    # my_filter = f"protocol_id={protocol._id},status=Todo"
+    # reader_tasks_todo = fwclient.get(f"/api/readertasks/project/{dest_proj_id}?filter={my_filter}").to_flat().get("results")
+    # print(len(reader_tasks_todo))
+
+    # my_filter = f"protocol_id={protocol._id},status=In_progress"
+    # reader_tasks_inprogress = fwclient.get(f"/api/readertasks/project/{dest_proj_id}?filter={my_filter}").to_flat().get("results")
+    # print(len(reader_tasks_inprogress))
+        
+    #Get files that have not been QC'ed
+    #These should be the files that still have the "read" tag
+
+    
+    # read_tagged_ids = set()
+    # for session in project.sessions():
+    #     session = session.reload()
+    #     for acquisition in session.acquisitions():
+    #         nifti_files_read = [f.id for f in acquisition.files if f.type=="nifti" and "read" in f.tags]
+    #         read_tagged_ids.update(nifti_files_read)
+    #         #n_read = n_read + len(nifti_files_read)
+
+    # # Collect counts
+    # n_complete = len(reader_tasks_complete)
+    # n_todo = len(reader_tasks_todo)
+    # n_inprogress = len(reader_tasks_inprogress)
+    
+    # task_file_ids = set()
+    # for task in (reader_tasks_complete + reader_tasks_todo + reader_tasks_inprogress):
+    #     if task.parent_info.file:
+    #         task_file_ids.add(task.parent_info.file.id.file_id)
+
+    # orphaned_read = read_tagged_ids - task_file_ids
+    # n_read_orphaned = len(orphaned_read)  
+
+    # # Create table dataframe
+    # QC_stats = pd.DataFrame({
+    #     "File Count": [n_complete, n_todo, n_inprogress, n_read_orphaned]
+    # }, index=["Complete", "Todo", "In Progress", "Not QC-Assigned"])
+
+
+    # ##### QC Completeness TABLE ####
+    # fig= plt.figure(figsize=(6, 12)) 
+    # ax = fig.add_axes([0.05, 0.2, 0.9, 0.6])
+
+    # # Add Title
+    # #plt.text(0.5, 0.95, 'Site Data Tracking', fontsize=14, ha='center', transform=fig.transFigure)
+
+    # # Turn off axes
+    # ax.axis('tight')
+    # ax.axis('off')
+
+    # table = ax.table(
+    #         cellText=QC_stats.reset_index().values.tolist(),
+    #         colLabels=["Status", "File Count"],
+    #         cellLoc='center',
+    #         loc='center'
+    #     )
+
+
+    # styles = getSampleStyleSheet()
+    # description_style = styles["Normal"]
+    # description_style.wordWrap = "CJK"  # Enables text wrapping
+
+
+    # # Adjust font size and scale
+    # table.auto_set_font_size(False)
+    # table.set_fontsize(12)
+    # table.scale(1.5, 1.5)  # Experiment with values for width and height scaling
+
+    # fig.set_size_inches(10, len(QC_stats.columns) * 0.5)
+
+
+    # ## Add some styling
+    # for (row, col), cell in table.get_celld().items():
+    #     cell.set_height(0.9)
+    #     cell.set_width(0.4)
+
+    #     # if row == 0:
+    #     #     cell.set_facecolor('#40466e')
+    #     #     cell.set_text_props(color='white', weight='bold')  # Skip header if you're adding one manually later
+
+    #     if col == 0:
+    #         cell.set_facecolor('#40466e')  # Blue
+    #         cell.set_text_props(color='white', weight='bold')
+    #     else:
+    #         cell.set_facecolor('#f0f0f0')  # Light gray
+
+
+    # # Adjust layout to ensure no overlap
+    # plt.subplots_adjust(top=0.85, bottom=0.8)  # Adjust to fit title and text properly
+    # table_path = os.path.join("QC_summary.png")
+    # plt.savefig(table_path,dpi=300, bbox_inches="tight")
+
+    # print(protocol._id)
+    # print(f"{protocol.get('label')}: {protocol.get('description')}")
+
+    #return table_path
+
 
 # 1. Generate Cover Page
 def create_cover_page (context, api_key, output_dir):
@@ -894,10 +1034,10 @@ def acquisition_trends(fw, cde_dict):
 
     subject_session_labels = metadata["subject_session_labels"]
 
-    with open('/flywheel/v0/utils/metadata_fields.yaml', 'r') as file:
+    with open('/flywheel/v0/utils/cde_template.yaml', 'r') as file:
         metadata = yaml.safe_load(file)
 
-    default = metadata["metadata_template"]
+    default = metadata["Demographics"] | metadata["SES"] | metadata["Cognitive"] 
     cde_data = None
 
     if cde_dict is None:
@@ -1163,95 +1303,84 @@ def acquisition_trends(fw, cde_dict):
         barplot_data[category] = cat_df
 
     # Step 3: Create facet grid of heatmaps
-    num_categories = len(cde_data.keys())
-    ncols = 2
-    nrows = math.ceil(num_categories / ncols)
-
-    fig, axes = plt.subplots(nrows, ncols,  figsize=(14, 12 ), sharex=True)
-
-    #fig_height_per_row = 0.4 * max(len(cols) for cols in barplot_data.values())  # adjust multiplier
-    #fig, axes = plt.subplots(num_categories, 1, figsize=(10, fig_height_per_row * num_categories), sharex=True)
+    max_vars_per_plot = 25
+    def chunk_list(lst, n):
+        for i in range(0, len(lst), n):
+            yield lst[i:i+n]
 
 
+    # Step 3: Create facet grid of heatmaps
+    def chunk_list(lst, n):
+        """Split list into chunks of size n."""
+        for i in range(0, len(lst), n):
+            yield lst[i:i+n]
 
-    if len(cde_data.keys()) == 1:
-        axes = [axes]
+    def plot_data_completeness(barplot_data, cde_data, completeness_df, work_dir):
+        max_vars_per_plot = 30
+        dpi = 300
 
-    axes = axes.flatten()
-    #for ax, (category, data) in zip(axes, barplot_data.items()):
+        for category, data in barplot_data.items():
+            cols = data.columns.tolist()
+            labels = [cde_data[category][i] for i in cde_data[category]]
 
-    for idx, (category, data) in enumerate(barplot_data.items()):
-        ax = axes[idx]
+            # Split into chunks
+            col_chunks = list(chunk_list(cols, max_vars_per_plot))
+            label_chunks = list(chunk_list(labels, max_vars_per_plot))
 
-        # Ensure columns are in desired order
-        cols = data.columns.tolist()
-        labels = [cde_data[category][i] for i in cde_data[category] ]  #data.columns.tolist() #[subject_session_labels[col] for col in cols]
+            for part, (chunk_cols, chunk_labels) in enumerate(zip(col_chunks, label_chunks), start=1):
 
-        # Calculate percent present and missing
-        present_percent = (completeness_df[cols] == 1).mean() * 100
-        na_percent = (completeness_df[cols] == -1.0).mean() * 100
-        missing_percent = 100 - (present_percent+ na_percent)
+                # Scale figure height by number of variables
+                fig_height = max(6, len(chunk_cols) * 0.4)
+                fig, ax = plt.subplots(figsize=(15, fig_height))
 
-        # Stack data for bars
-        bar_widths = np.vstack([present_percent.values, missing_percent.values, na_percent.values])
+                # Calculate % present, missing, NA
+                present_percent = (completeness_df[chunk_cols] == 1).mean() * 100
+                na_percent = (completeness_df[chunk_cols] == -1.0).mean() * 100
+                missing_percent = 100 - (present_percent + na_percent)
 
-        # Plot
-        # fig, ax = plt.subplots(figsize=(10, 6))
-        ax.barh(
-            y=np.arange(len(cols)),
-            width=bar_widths[0],
-            color="green",
-            label="% Present"
-        )
-        ax.barh(
-            y=np.arange(len(cols)),
-            width=bar_widths[1],
-            left=bar_widths[0],
-            color="red",
-            label="% Missing"
-        )
-        ax.barh(
-            y=np.arange(len(cols)),
-            width=bar_widths[2],
-            left=bar_widths[0] + bar_widths[1],  # <- fix: cumulative offset
-            color="lightgray",
-            label="% N/A"
-        )
+                bar_widths = np.vstack([present_percent.values,
+                                        missing_percent.values,
+                                        na_percent.values])
 
-        # Y-axis tick order matches `cols`
-        ax.set_yticks(np.arange(len(cols)))
-    
-        ax.set_yticklabels(labels, fontsize=10)
+                # Plot stacked bars
+                ax.barh(np.arange(len(chunk_cols)), bar_widths[0], color="green", label="% Present")
+                ax.barh(np.arange(len(chunk_cols)), bar_widths[1], left=bar_widths[0], color="red", label="% Missing")
+                ax.barh(np.arange(len(chunk_cols)), bar_widths[2], left=bar_widths[0] + bar_widths[1],
+                        color="lightgray", label="% N/A")
 
-        # Format axes
-        ax.set_xlim(0, 100)
-        ax.set_title(f'{category} completeness')
-        ax.set_title(category)
-        ax.tick_params(axis='x', labelsize=14)
+                # Format axes
+                ax.set_yticks(np.arange(len(chunk_cols)))
+                ax.set_yticklabels(chunk_labels, fontsize=14)
+                ax.invert_yaxis()  # First variable at the top
+                ax.set_xlim(0, 100)
 
-       
-    # Create a single legend for the entire figure using the first subplot's handles
-    if len(cde_data.keys()) > 0:
-        first_ax = axes[0] if hasattr(axes, '__iter__') else axes
-        handles, labels = first_ax.get_legend_handles_labels()
-        fig.legend(
-            handles, labels,
-            loc='upper left',
-            bbox_to_anchor=(1, 1),
-            fontsize=12
-        )
-    #plt.suptitle("Categorised Session Information Completeness", fontsize=14, fontweight="semibold")
-    plt.tight_layout()
-    data_comleteness_path = os.path.join(work_dir,"data_completeness.png")
-    plt.savefig(data_comleteness_path,dpi=200, bbox_inches='tight')
+                title = f"{category}" if len(col_chunks) > 1 else category
+                ax.set_title(title, fontsize=14)
+
+                # Add legend below plot
+                handles, labels_legend = ax.get_legend_handles_labels()
+                fig.legend(handles, labels_legend, loc="lower center", ncol=3,
+                        bbox_to_anchor=(0.5, -0.02), fontsize=14)
+
+                # Adjust layout to make room for legend
+                plt.tight_layout(rect=[0, 0.05, 1, 1])
+
+                # Save figure
+                fname = f"{category}_part{part}_completeness.png" if len(col_chunks) > 1 else f"{category}_completeness.png"
+                fpath = os.path.join(work_dir, fname)
+                plt.savefig(fpath, dpi=dpi, bbox_inches="tight")
+                plt.close(fig)
+
+                print(f"Saved: {fpath}")
 
     
+    plot_data_completeness(barplot_data, cde_data, completeness_df, work_dir)
     #Saving failed analyses
     failed_analyses.to_csv(os.path.join(out_dir,"Sessions_failed_analyses.csv"),index=False)
     data_completeness.to_csv(os.path.join(out_dir,"SessionData_Missingness.csv"),index=False)
 
     #summaryTable_path , _ , acquisition_plot_path, data_completeness_path, asysplot_path, asys_summary_df = acquisition_trends(fw)
-    return table_path,acq_time_plot_path, acquisition_plot_path, data_comleteness_path, asysplot_path, summary
+    return table_path,acq_time_plot_path, acquisition_plot_path, asysplot_path, summary
 
 
 def generate_gear_appendix(summary_asys, gears):
@@ -1689,7 +1818,8 @@ def generate_full_qc_report(context, cover, api_key, input, cde_dict,qc_done):
     # Paths for generated images
     #Call gear_appendix function
     gears , gear_v = gear_appendix(fw)
-    summaryTable_path , _ , acquisition_plot_path, data_completeness_path, asysplot_path, asys_summary_df = acquisition_trends(fw, cde_dict)
+    summaryTable_path , _ , acquisition_plot_path, asysplot_path, asys_summary_df = acquisition_trends(fw, cde_dict)
+    #qcTable_path = qc_completeness(context, api_key)
     
 
     # --- Generate plots/tables as in the old function ---
@@ -1699,13 +1829,14 @@ def generate_full_qc_report(context, cover, api_key, input, cde_dict,qc_done):
     # --- Add Plots/Images as Flowables ---
     plot_paths = [
         summaryTable_path,
-        data_completeness_path,
+        #qcTable_path,
+
         acquisition_plot_path,
         asysplot_path
     ]
     plot_titles = [
         "Project Summary Table",
-        "Data Completeness",
+        #"QC Summary Table",
         "Acquisition Plot",
         "Analysis Runs Plot"
     ]
@@ -1724,7 +1855,7 @@ def generate_full_qc_report(context, cover, api_key, input, cde_dict,qc_done):
         else:
             log.warning(f"{title} not found at {path}")
 
-     # --- Add Project Summary Table ---
+    # --- Add Project Summary Table ---
     if os.path.exists(summaryTable_path):
         log.info(f"Path exists {summaryTable_path}")
         elements.append(Paragraph("<b>Project Summary Table</b>", styles['Heading2']))
@@ -1734,12 +1865,24 @@ def generate_full_qc_report(context, cover, api_key, input, cde_dict,qc_done):
         elements.append(Spacer(1, 12))
     else:
         log.warning(f"Project summary table not found at {summaryTable_path}")
-        
 
+    
+    # --- Add QC Summary Table ---
+    # if os.path.exists(qcTable_path):
+    #     log.info(f"Path exists {qcTable_path}")
+    #     elements.append(Paragraph("<b>QC Summary Table</b>", styles['Heading2']))
+    #     width, height = scale_image(qcTable_path, 500, 400)
+    #     elements.append(Spacer(1, 24))
+    #     elements.append(Image(qcTable_path, width=width, height=height))
+    #     elements.append(Spacer(1, 12))
+    # else:
+    #     log.warning(f"QC summary table not found at {qcTable_path}")
+        
+    # elements.append(PageBreak())
     # --- Add analysis plot ---
     if os.path.exists(asysplot_path):
         log.info(f"Path exists {asysplot_path}")
-        elements.append(Paragraph("<b>Analysis Runs</b>", styles['Heading2']))
+        elements.append(Paragraph("<b>Analyses Runs</b>", styles['Heading2']))
         width, height = scale_image(asysplot_path, 500, 400)
         elements.append(Image(asysplot_path, width=width, height=height))
         elements.append(Spacer(1, 12))
@@ -1748,21 +1891,35 @@ def generate_full_qc_report(context, cover, api_key, input, cde_dict,qc_done):
 
     elements.append(PageBreak())
     # --- Add Data Completeness plot ---
-    if os.path.exists(data_completeness_path):
-        log.info(f"Path exists {data_completeness_path}")
-        elements.append(Paragraph("<b>Categorised Data Completeness</b>", styles['Heading2']))
-        width, height = scale_image(data_completeness_path, 500, 400)
-        elements.append(Image(data_completeness_path, width=width, height=height))
-        elements.append(Spacer(1, 12))
-    else:
-        log.warning(f"Data completeness plot not found at {data_completeness_path}")   
+    def add_completeness_plots_to_pdf(elements, work_dir):
+        # Find all saved completeness images
+        plot_files = sorted(glob.glob(os.path.join(work_dir, "*_completeness.png")))
 
+        if not plot_files:
+                print("No completeness plots found to add to PDF.")
+                return
+
+        # Add section title
+        elements.append(Paragraph("<b>Data Completeness</b>", styles['Heading2']))
+        elements.append(Spacer(1, 24))
+
+        for fpath in plot_files:
+                log.info(f"Adding {fpath} to PDF")
+                # Scale for page (fit within ~500x400)
+                width, height = scale_image(fpath, 500, 400)
+                elements.append(Image(fpath, width=width, height=height))
+                elements.append(Spacer(1, 12))
+
+                # Page break after each plot
+                #
+    
+    add_completeness_plots_to_pdf(elements, work_dir)
+    
     elements.append(PageBreak())
-
     # --- Add Compeleted Acquisition Plot ---
     if os.path.exists(acquisition_plot_path):
         log.info(f"Path exists {acquisition_plot_path}")
-        elements.append(Paragraph("<b>Number of Acquisitions</b>", styles['Heading2']))
+        elements.append(Paragraph("<b>Acquisition Summary</b>", styles['Heading2']))
         width, height = scale_image(acquisition_plot_path, 500, 400)
         elements.append(Spacer(1, 24))
         elements.append(Image(acquisition_plot_path, width=width, height=height))
@@ -1858,14 +2015,14 @@ def generate_full_qc_report(context, cover, api_key, input, cde_dict,qc_done):
         project = project.reload() 
 
         custom_name = f"QC_report_{formatted_timestamp}.pdf"
-        project.upload_file(final_report, filename=custom_name)
-        project.upload_file(os.path.join(out_dir,"SessionData_Missingness.csv"),filename="SessionData_Missingness.csv")
+        #project.upload_file(final_report, filename=custom_name)
+        #project.upload_file(os.path.join(out_dir,"SessionData_Missingness.csv"),filename="SessionData_Missingness.csv")
         log.info("Report has been uploaded to the project's information tab.")
 
     except Exception as e:
         log.error(e)
 
-    return final_report
+    return 0 #all is vell
 
 
 

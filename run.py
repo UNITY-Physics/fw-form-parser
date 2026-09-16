@@ -22,14 +22,14 @@ def main(context: GearToolkitContext) -> None:
 
         # Run CSV parser
         e_code, output = run_csv_parser(context, api_key)
-
+        
 
         # Run the tagger function
         qc_done = run_tagger(context, api_key)
-        out_dir = '/flywheel/v0/output'
+        #out_dir = '/flywheel/v0/output'
         work_dir = '/flywheel/v0/work'
-        output = os.path.join(out_dir,output)
         # Run the pdf report function
+        #qc_done=1
         cover = create_cover_page (context, api_key, work_dir)
         e_code = generate_full_qc_report(context, cover, api_key, output, cde_dict, qc_done)
 
