@@ -6,9 +6,7 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import SimpleDocTemplate, Paragraph, PageTemplate, Frame
 from reportlab.lib.utils import ImageReader
 from PIL import Image
-
-
-
+import pandas as pd
 import datetime
 
 def generate_on_page(user,project_label):
@@ -302,6 +300,14 @@ def simplify_label(label):
     # Initialize empty result
     result = []
     
+    if label is None:
+        return None
+    try:
+        if pd.isna(label):
+            return None
+    except (TypeError, ValueError):
+        pass
+
     # Check for orientation
     if 'AXI' in label.upper():
         result.append('AXI')

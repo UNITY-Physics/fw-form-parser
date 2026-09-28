@@ -2,7 +2,13 @@
   "author": "Niall Bourke, Hajer Karoui",
   "cite": "",
   "command": "python3 /flywheel/v0/run.py",
-  "config": {},
+  "config": {
+    "QC-Report": {
+      "description": "Output a QC report in PDF format, with acquisition trends and tagging summary.",
+      "default": false,
+      "type": "boolean"
+    }
+  },
   "custom": {
     "analysis-level": "project",
     "flywheel": {
@@ -26,7 +32,7 @@
     },
     "gear-builder": {
       "category": "analysis",
-      "image": "flywheel/form-parser:0.1.38"
+      "image": "flywheel/form-parser:0.1.39"
     },
     "kcl-app-binary": "app/main.sh",
     "kcl-app-modalities": [
@@ -67,5 +73,5 @@
   "name": "form-parser",
   "source": "",
   "url": "https://github.com/UNITY-Physics/fw-form-parser/",
-  "version": "0.1.38"
+  "version": "0.1.39"
 }

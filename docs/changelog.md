@@ -1,4 +1,9 @@
 # Changelog
+
+28/09/2026:
+"version": "0.1.39"
+This version was adapted to handle Clinical QC (session-based). Tweaks were also made to disable automatic PDF generation, and removing session QC tags to avoid situations where we have contradicting session QC statuses.
+
 28/07/2025
 "version": "0.1.32"
 This version should be the the upgraded working version of the gear. It outputs missingness based on the dictionary uploaded, outputs QCing outcomes and a quantitative project summary.

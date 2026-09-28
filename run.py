@@ -18,7 +18,7 @@ def main(context: GearToolkitContext) -> None:
 
     try:
         # Get the input files
-        api_key, cde_dict = parse_config(context)
+        api_key, cde_dict, qc_report = parse_config(context)
 
         # Run CSV parser
         e_code, output = run_csv_parser(context, api_key)
@@ -30,8 +30,9 @@ def main(context: GearToolkitContext) -> None:
         work_dir = '/flywheel/v0/work'
         # Run the pdf report function
         #qc_done=1
-        cover = create_cover_page (context, api_key, work_dir)
-        e_code = generate_full_qc_report(context, cover, api_key, output, cde_dict, qc_done)
+        if qc_report:
+            cover = create_cover_page (context, api_key, work_dir)
+            e_code = generate_full_qc_report(context, cover, api_key, output, cde_dict, qc_done)
 
 
     except (TimeoutError, requests.exceptions.ConnectionError) as exc:

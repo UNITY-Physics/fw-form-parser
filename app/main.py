@@ -89,173 +89,457 @@ def convert_markdown_to_html(markdown_text):
     return html
 
 
-def process_task(task_df, fw):
 
-    
-    # Preallocate variables
-    axi = None
-    cor = None
-    sag = None
-    t2_qc = None
+# --- Mappings ---
 
-    # then iterate over the rows of the filtered dataframe
+ANSWER_TO_QC_STATUS = {
+    "0": 'pass',
+    "1": 'unclear',
+    "2": 'fail',
+}
 
-    for index, row, in task_df.iterrows():
-        # pull the acquisition object from the API
+QC_STATUS_TO_TAG = {
+    'pass':    'QC-passed',
+    'unclear': 'QC-unclear',
+    'fail':    'QC-failed',
+}
+
+SESSION_TAG_MAP = {
+    'pass':    'T2w_QC_passed',
+    'unclear': 'T2w_QC_unclear',
+    'fail':    'T2w_QC_failed',
+}
+
+# Maps question suffix → orientation key used in the rest of the code
+QUESTION_TO_ORIENTATION = {
+    'quality_t2_axi':        'axi',
+    'quality_t2_cor':        'cor',
+    'quality_t2_sag':        'sag',
+    'quality_t2_axi_repeat': 'axi_repeat',
+    'quality_t1_axi':        't1_axi',
+}
+
+# Protocol name constants
+PROTOCOL_SESSION_BASED     = 'Clinical QC'
+PROTOCOL_ACQUISITION_BASED = 'QC'
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def apply_qc_tag(obj, qc_tag: str, context: str) -> None:
+    """Delete the 'read' tag and apply a QC tag to a Flywheel object."""
+    try:
+        obj.delete_tag('read')
+        obj.add_tag(qc_tag)
+    except flywheel.ApiException as e:
+        log.error(f'Error adding tag to {context}: {e}')
+
+
+def get_nii_file(fw, acquisition):
+    """Return the Flywheel file object for the first .nii.gz file in an acquisition."""
+    for f in acquisition.files:
+        if f.name.endswith('nii.gz'):
+            return fw.get_file(f.file_id)
+    return None
+
+
+def resolve_session_qc(axi: str, cor: str, sag: str) :
+    """
+    Determine the overall session QC status from the three orientation results.
+    Priority: fail > unclear > pass (all-pass required for pass).
+    """
+    orientations = (axi, cor, sag)
+    if all(o == 'pass' for o in orientations):
+        return 'pass'
+    if any(o == 'fail' for o in orientations):
+        return 'fail'
+    if any(o == 'unclear' for o in orientations):
+        return 'unclear'
+    return None
+
+
+def get_orientation(label: str):
+    """Infer orientation key from an acquisition label."""
+    label_upper = label.upper()
+    if 'MAPPING' not in label_upper and 'AXI' in label_upper:
+        return 'axi'
+    if 'COR' in label_upper:
+        return 'cor'
+    if 'SAG' in label_upper:
+        return 'sag'
+    return None
+
+
+def tag_acquisition(fw, acquisition, qc_status: str, label_hint: str) -> None:
+    """Apply QC tag to an acquisition and its .nii.gz file."""
+    qc_tag = QC_STATUS_TO_TAG[qc_status]
+    apply_qc_tag(acquisition, qc_tag, f'acquisition ({label_hint})')
+
+    nii_file = get_nii_file(fw, acquisition)
+    if nii_file:
+        apply_qc_tag(nii_file, qc_tag, f'file ({label_hint})')
+    else:
+        log.warning(f'No .nii.gz file found in acquisition "{label_hint}"')
+
+
+# ---------------------------------------------------------------------------
+# Session-based helpers  (protocol: "clinical-reporting QC")
+# ---------------------------------------------------------------------------
+
+def parse_form_responses(task_df) -> dict:
+    """
+    Pivot the long-form question/answer rows into a flat dict for easy lookup.
+
+    Returns something like:
+    {
+        'quality_t2_axi':                2,
+        'quality_t2_cor':                0,
+        'quality_t2_sag':                0,
+        'quality_t2_axi_repeat':         0,
+        'quality_t1_axi':                0,
+        'repeat_t2_axi':                 1,   # 1 = yes there is a repeat
+        'repeat_t2_cor':                 0,
+        'repeat_t2_sag':                 0,
+        'repeat_t1_axi':                 0,
+        'reported_series_t2_axi':        1,   # series index of the *primary* scan
+        'reported_series_number_t2_axi': 10,  # actual DICOM series number
+        'artifacts_t2_axi':              ['motion', 'zipper'],
+        ...
+    }
+    """
+    responses = {}
+    for _, row in task_df.iterrows():
+        responses[row['Question']] = row['Answer']
+    return responses
+
+
+def get_dicom_series_number(fw, acquisition) :
+    """
+    Read the SeriesNumber DICOM tag from the first .dcm (or DICOM zip) file
+    attached to an acquisition.
+
+    Strategy:
+      1. Find the first file whose type is 'dicom' (or name ends with '.dcm').
+      2. Call fw.get_file_zip_info() to list zip members.
+      3. Read the first member with fw.read_file_zip_member() and parse with pydicom.
+      4. Return ds.SeriesNumber as an int, or None on any failure.
+    """
+    import pydicom
+    import io
+
+    # Locate the DICOM file on the acquisition
+    dicom_file = None
+    for f in acquisition.files:
+        if f.type == 'dicom' or f.name.lower().endswith('.dcm'):
+            dicom_file = f
+            break
+
+    if dicom_file is None:
+        log.warning(f'No DICOM file found on acquisition "{acquisition.label}"')
+        return None
+
+    try:
+        zip_info = fw.get_file_zip_info(dicom_file.file_id)
+        if not zip_info.members:
+            log.warning(f'DICOM zip for "{acquisition.label}" has no members')
+            return None
+
+        # Read just the first slice — enough to get SeriesNumber
+        first_member = zip_info.members[0].path
+        raw = fw.read_file_zip_member(dicom_file.file_id, first_member)
+        ds = pydicom.dcmread(io.BytesIO(raw), stop_before_pixels=True)
+        return int(ds.SeriesNumber)
+
+    except Exception as e:
+        log.error(f'Error reading DICOM SeriesNumber for "{acquisition.label}": {e}')
+        return None
+
+
+def find_acquisition_by_pattern(fw, session_acquisitions, pattern: str, series_number: int):
+    """
+    Search a list of Flywheel acquisition objects for one whose label contains
+    `pattern` (case-insensitive).
+
+    If `series_number` is given AND multiple acquisitions match the label pattern,
+    disambiguate by reading the SeriesNumber from each acquisition's DICOM file.
+
+    Returns the first matching acquisition, or None.
+    """
+    pattern_upper = pattern.upper()
+    candidates = [
+        acq for acq in session_acquisitions
+        if pattern_upper in acq.label.upper()
+    ]
+
+    if not candidates:
+        log.warning(f'No acquisitions found matching pattern "{pattern}"')
+        return None
+
+    # Only one match — no disambiguation needed
+    if series_number is None or len(candidates) == 1:
+        return candidates[0]
+
+    # Multiple acquisitions match the label — disambiguate via DICOM SeriesNumber
+    log.info(
+        f'Multiple acquisitions match "{pattern}" '
+        f'({[a.label for a in candidates]}); disambiguating by SeriesNumber={series_number}'
+    )
+    for acq in candidates:
+        acq_series = get_dicom_series_number(fw, acq)
+        if acq_series is not None and acq_series == int(series_number):
+            return acq
+
+    log.warning(
+        f'Could not match SeriesNumber={series_number} among candidates '
+        f'{[a.label for a in candidates]}. Falling back to first match.'
+    )
+    return candidates[0]
+
+
+def find_repeat_acquisition(fw, session_acquisitions, pattern: str, primary_series_number: int):
+    """
+    Among all acquisitions matching `pattern`, return the one whose DICOM
+    SeriesNumber does NOT match `primary_series_number`.
+
+    This is used to locate the repeat scan when the primary has already been
+    identified by its series number.
+    """
+    pattern_upper = pattern.upper()
+    candidates = [
+        acq for acq in session_acquisitions
+        if pattern_upper in acq.label.upper()
+    ]
+
+    if len(candidates) <= 1:
+        log.warning(f'Expected multiple acquisitions for repeat lookup of "{pattern}", found {len(candidates)}.')
+        return None
+
+    for acq in candidates:
+        acq_series = get_dicom_series_number(fw, acq)
+        if acq_series is not None and acq_series != int(primary_series_number):
+            return acq
+
+    log.warning(f'Could not identify repeat acquisition for pattern "{pattern}".')
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Protocol implementations
+# ---------------------------------------------------------------------------
+
+# Configuration for the session-based protocol orientations.
+# Extend this dict to support additional orientations or modalities.
+ORIENTATION_CONFIG = {
+    'axi': {
+        'quality_key':        'quality_t2_axi',
+        'repeat_key':         'repeat_t2_axi',
+        'repeat_quality_key': 'quality_t2_axi_repeat',
+        'series_key':         'reported_series_number_t2_axi',
+        'label_pattern':      'T2 AXI',
+    },
+    'cor': {
+        'quality_key':        'quality_t2_cor',
+        'repeat_key':         'repeat_t2_cor',
+        'repeat_quality_key': None,
+        'series_key':         None,
+        'label_pattern':      'T2 COR',
+    },
+    'sag': {
+        'quality_key':        'quality_t2_sag',
+        'repeat_key':         'repeat_t2_sag',
+        'repeat_quality_key': None,
+        'series_key':         None,
+        'label_pattern':      'T2 SAG',
+    },
+}
+
+
+def _process_task_session_based(task_df, fw):
+    """
+    Process a session-scoped QC form (protocol: "clinical-reporting QC").
+
+    The CSV format has:
+      - No acquisition.id — the task is linked to a session only.
+      - One row per question/answer pair (long format).
+      - Quality questions named like: quality_t2_axi, quality_t2_cor, quality_t2_sag,
+        quality_t2_axi_repeat, quality_t1_axi.
+      - Repeat flags: repeat_t2_axi / repeat_t2_cor / repeat_t2_sag (1 = repeat exists).
+      - reported_series_number_t2_axi: the DICOM series number to disambiguate acquisitions.
+    """
+    first_row     = task_df.iloc[0]
+    session_id    = first_row['session.id']
+    subject_label = first_row['Subject Label']
+    session_label = first_row['Session Label']
+
+    log.info(f"[session-based] Processing session {session_label} for subject {subject_label}")
+
+    responses = parse_form_responses(task_df)
+
+    try:
+        session              = fw.get_session(session_id)
+        session_acquisitions = session.acquisitions()
+    except flywheel.ApiException as e:
+        log.error(f'Error fetching session {session_id}: {e}')
+        return
+
+    orientations = {'axi': None, 'cor': None, 'sag': None}
+
+    for orientation, cfg in ORIENTATION_CONFIG.items():
+        quality_answer = responses.get(cfg['quality_key'])
+        if quality_answer is None:
+            log.warning(f"No quality answer found for {cfg['quality_key']} — skipping.")
+            continue
+
+        qc_status = ANSWER_TO_QC_STATUS.get(quality_answer)
+        if qc_status is None:
+            log.warning(f"Unknown answer value {quality_answer!r} for {cfg['quality_key']} — skipping.")
+            continue
+
+        orientations[orientation] = qc_status
+        has_repeat    = bool(responses.get(cfg['repeat_key'], 0))
+        series_number = responses.get(cfg['series_key']) if cfg['series_key'] else None
+
+        # --- Tag the primary acquisition ---
+        primary_acq = find_acquisition_by_pattern(
+            fw, session_acquisitions, cfg['label_pattern'], series_number
+        )
+        if primary_acq:
+            log.info(f"[{orientation}] Primary acquisition: {primary_acq.label} → {qc_status}")
+            tag_acquisition(fw, primary_acq, qc_status, primary_acq.label)
+        else:
+            log.warning(f"[{orientation}] No primary acquisition found for pattern '{cfg['label_pattern']}'")
+
+        # --- Tag the repeat acquisition (if present) ---
+        if has_repeat and cfg['repeat_quality_key']:
+            repeat_answer = responses.get(cfg['repeat_quality_key'])
+            repeat_status = ANSWER_TO_QC_STATUS.get(repeat_answer)
+            if repeat_status is None:
+                log.warning(f"No valid repeat quality answer for {cfg['repeat_quality_key']} — skipping repeat.")
+            else:
+                # The repeat is the *other* T2 AXI — the one whose SeriesNumber
+                # does NOT match the primary's reported series number.
+                repeat_acq = find_repeat_acquisition(
+                    fw, session_acquisitions, cfg['label_pattern'], series_number
+                )
+                if repeat_acq:
+                    log.info(f"[{orientation}] Repeat acquisition: {repeat_acq.label} → {repeat_status}")
+                    tag_acquisition(fw, repeat_acq, repeat_status, repeat_acq.label)
+                else:
+                    log.warning(f"[{orientation}] No repeat acquisition found for pattern '{cfg['label_pattern']}'")
+
+    # --- Session-level tag ---
+    session_qc = resolve_session_qc(
+        orientations['axi'], orientations['cor'], orientations['sag']
+    )
+    if session_qc:
+        session_tag = SESSION_TAG_MAP[session_qc]
+        log.info(f"Session QC → {session_tag} for subject {subject_label}")
+        try:
+            session.add_tag(session_tag)
+        except flywheel.ApiException as e:
+            log.error(f'Error adding session tag: {e}')
+    else:
+        log.warning(f"Could not determine session QC status for {subject_label} — not all orientations resolved.")
+
+    print("***")
+    print(f"Visual QC report | subject: {subject_label} | session: {session_label}")
+    print(f"  T2w_axi: {orientations['axi']}  T2w_cor: {orientations['cor']}  T2w_sag: {orientations['sag']}  T2w_all: {session_qc}")
+    print("***")
+
+
+def _process_task_acquisition_based(task_df, fw):
+    """
+    Process the legacy per-acquisition QC form (protocol: "QC").
+
+    The CSV format has:
+      - One row per acquisition, with acquisition.id present.
+      - A single 'Question' == "quality" column with Answer 0/1/2.
+    """
+    axi = cor = sag = t2_qc = None
+
+    for _, row in task_df.iterrows():
+        if row['Question'] != 'quality':
+            continue
+
         acquisition_id = row['acquisition.id']
         try:
             acquisition = fw.get_acquisition(acquisition_id)
         except flywheel.ApiException as e:
-            log.error(f'Error getting acquisition: {e}')
+            log.error(f'Error getting acquisition {acquisition_id}: {e}')
             continue
 
-        if row['Question'] == "quality" and row['Answer'] == 0:
-            log.info(f"QC-passed {row['Subject Label']} {row['Acquisition Label']} {row['acquisition.id']}")
-            
-            # Set the orientation variable for later use in the session QC
-            if 'AXI' in row['Acquisition Label'] or 'axi' in row['Acquisition Label']:
-                axi = 'pass'
-            elif 'COR' in row['Acquisition Label'] or 'cor' in row['Acquisition Label']:
-                cor = 'pass'
-            elif 'SAG' in row['Acquisition Label'] or 'sag' in row['Acquisition Label']:
-                sag = 'pass'
-            
-            try:
-                # Add a tag to a acquisition
-                acquisition.delete_tag('read')
-                acquisition.add_tag('QC-passed')
-                
+        qc_status = ANSWER_TO_QC_STATUS.get(row['Answer'])
+        if qc_status is None:
+            log.warning(f"Unknown answer {row['Answer']!r} for acquisition {acquisition_id} — skipping.")
+            continue
 
+        log.info(f"QC-{qc_status} {row['Subject Label']} {row['Acquisition Label']} {acquisition_id}")
 
-            except flywheel.ApiException as e:
-                log.error(f'Error adding tag to acquisition: {e}')
+        orientation = get_orientation(row['Acquisition Label'])
+        if orientation:
+            if orientation == 'axi':
+                axi = qc_status
+            elif orientation == 'cor':
+                cor = qc_status
+            elif orientation == 'sag':
+                sag = qc_status
 
-            try:
-                # Add a tag to the file
-                for file in acquisition.files:
-                    if file.name.endswith('nii.gz'):
-                        file_id = file.file_id
-                        break
-                
-                file = fw.get_file(file_id)
-                file.delete_tag('read')
-                file.add_tag('QC-passed')
-                
+        tag_acquisition(fw, acquisition, qc_status, row['Acquisition Label'])
 
-            except flywheel.ApiException as e:
-                log.error(f'Error adding tag to file: {e}')
+    # --- Session-level tag ---
+    session_qc = resolve_session_qc(axi, cor, sag)
+    if session_qc:
+        session_tag = SESSION_TAG_MAP[session_qc]
+        last_row      = task_df.iloc[-1]
+        subject_label = last_row['Subject Label']
+        session_label = last_row['Session Label']
+        log.info(f"Session QC → {session_tag} for subject {subject_label}")
+        try:
+            session = fw.get_session(last_row['session.id'])
+            for tag in session.tags:
+                log.info(f"Removing tag {tag} from session {session.id}")
+                session.delete_tag(tag)
+            session.add_tag(session_tag)
+        except flywheel.ApiException as e:
+            log.error(f'Error adding session tag: {e}')
 
-
-        elif row['Question'] == "quality" and row['Answer'] == 1:
-            log.info(f"QC-unclear {row['Subject Label']} {row['Acquisition Label']} {row['acquisition.id']}")
-            
-            # Set the orientation variable for later use in the session QC
-            if 'AXI' in row['Acquisition Label'] or 'axi' in row['Acquisition Label']:
-                axi = 'unclear'
-            elif 'COR' in row['Acquisition Label'] or 'cor' in row['Acquisition Label']:
-                cor = 'unclear'
-            elif 'SAG' in row['Acquisition Label'] or 'sag' in row['Acquisition Label']:
-                sag = 'unclear'
-            
-            try:
-                # Add a tag to a acquisition
-                acquisition.add_tag('QC-unclear')
-                acquisition.delete_tag('read')
-
-            except flywheel.ApiException as e:
-                log.error(f'Error adding tag to acquisition: {e}')
-
-            try:
-                # Add a tag to the file
-                for file in acquisition.files:
-                    if file.name.endswith('nii.gz'):
-                        file_id = file.file_id
-                        break
-                    
-                file = fw.get_file(file_id)
-                file.delete_tag('read')
-                file.add_tag('QC-unclear')
-                
-
-            except flywheel.ApiException as e:
-                log.error(f'Error adding tag to file: {e}')
-
-        elif row['Question'] == "quality" and row['Answer'] == 2:
-            log.info(f"QC-failed {row['Subject Label']} {row['Acquisition Label']} {row['acquisition.id']}")
-            
-            # Set the orientation variable for later use in the session QC
-            if 'AXI' in row['Acquisition Label'] or 'axi' in row['Acquisition Label']:
-                axi = 'fail'
-            elif 'COR' in row['Acquisition Label'] or 'cor' in row['Acquisition Label']:
-                cor = 'fail'
-            elif 'SAG' in row['Acquisition Label'] or 'sag' in row['Acquisition Label']:
-                sag = 'fail'
-
-            try:
-                # Add a tag to a acquisition
-                acquisition.delete_tag('read')
-                acquisition.add_tag('QC-failed')
-                
-
-            except flywheel.ApiException as e:
-                log.error(f'Error adding tag to acquisition: {e}')
-
-            try:
-                # Add a tag to the file
-                for file in acquisition.files:
-                    if file.name.endswith('nii.gz'):
-                        file_id = file.file_id
-                        break
-                    
-                file = fw.get_file(file_id)
-                file.delete_tag('read')
-                file.add_tag('QC-failed')
-                
-            except flywheel.ApiException as e:
-                log.error(f'Error adding tag to file: {e}')
-
-        # Check if all the three orientations have passed QC
-        # Add a tag to a session [T2w_QC_passed, T2w_QC_failed, T2w_QC_unclear]
-        if axi == 'pass' and cor == 'pass' and sag == 'pass':
-            log.info(f"T2w QC passed {row['Subject Label']}")
-            t2_qc = 'pass'
-            session_id = row['session.id']
-            session = fw.get_session(session_id)
-            try:
-                # Add a tag to a session
-                session.add_tag('T2w_QC_passed')
-            except flywheel.ApiException as e:
-                    log.error(f'Error adding tag to session: {e}')
-        elif axi == 'fail' or cor == 'fail' or sag == 'fail':
-            log.info(f"T2w QC failed {row['Subject Label']}")
-            t2_qc = 'fail'
-            session_id = row['session.id']
-            session = fw.get_session(session_id)
-            try:
-                # Add a tag to a session
-                session.add_tag('T2w_QC_failed')
-            except flywheel.ApiException as e:
-                    log.error(f'Error adding tag to session: {e}')
-        elif axi == 'unclear' or cor == 'unclear' or sag == 'unclear':
-            log.info(f"T2w QC unclear {row['Subject Label']}")
-            t2_qc = 'unclear'
-            session_id = row['session.id']
-            session = fw.get_session(session_id)
-            try:
-                # Add a tag to a session
-                session.add_tag('T2w_QC_unclear')
-            except flywheel.ApiException as e:
-                    log.error(f'Error adding tag to session: {e}')
-        
-        # Append the results to the preallocated lists
         print("***")
-        print("Visual QC report for subject: ", row['Subject Label'], "session: ", row['Session Label'])
-        print("T2w_axi: ", axi, "T2w_cor: ", cor, "T2w_sag: ", sag, "T2w_all: ", t2_qc)
+        print(f"Visual QC report | subject: {subject_label} | session: {session_label}")
+        print(f"  T2w_axi: {axi}  T2w_cor: {cor}  T2w_sag: {sag}  T2w_all: {session_qc}")
         print("***")
-        
-    # same logic you had per task_id
-    # move code from your for-loop here
-    pass  # implement your tagging logic here
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher — single public entry point
+# ---------------------------------------------------------------------------
+
+PROTOCOL_HANDLERS = {
+    PROTOCOL_SESSION_BASED:     _process_task_session_based,
+    PROTOCOL_ACQUISITION_BASED: _process_task_acquisition_based,
+}
+
+
+def process_task(task_df, fw):
+    """
+    Route a task dataframe to the correct processing function based on protocolName.
+
+    Supported protocols
+    -------------------
+    'clinical-reporting QC'  →  session-scoped, long-form questions, no acquisition.id
+    'QC'                     →  legacy per-acquisition rows with acquisition.id
+    """
+    protocol = task_df.iloc[0].get('Protocol Name', '')
+    handler  = PROTOCOL_HANDLERS.get(protocol)
+
+    if handler is None:
+        raise ValueError(
+            f"Unknown protocolName '{protocol}'. "
+            f"Expected one of: {list(PROTOCOL_HANDLERS.keys())}"
+        )
+
+    handler(task_df, fw)
 
 
 def run_tagger(context, api_key):
@@ -461,7 +745,10 @@ def run_csv_parser(context, api_key):
 
         
     # Apply the function to simplify acquisition labels using .loc
-    df.loc[:, 'Acquisition Label'] = df['Acquisition Label'].apply(simplify_label)
+    #df.loc[:, 'Acquisition Label'] = df['Acquisition Label'].apply(simplify_label)
+    # After — NaN rows are left as-is, only valid labels are simplified:
+    mask = df['Acquisition Label'].notna()
+    df.loc[mask, 'Acquisition Label'] = df.loc[mask, 'Acquisition Label'].apply(simplify_label)
 
     # Step 4: Filter for 'quality' questions and pivot
     quality_df = df[df['Question'] == 'quality']
@@ -802,7 +1089,10 @@ def acquisition_trends(fw, cde_dict):
     df = pd.read_csv('/flywheel/v0/work/filtered_file.csv')
 
     # Simplify acquisition label for counts
-    df.loc[:, 'Acquisition Label'] = df['Acquisition Label'].apply(simplify_label)
+    #df.loc[:, 'Acquisition Label'] = df['Acquisition Label'].apply(simplify_label)
+    # After — NaN rows are left as-is, only valid labels are simplified:
+    mask = df['Acquisition Label'].notna()
+    df.loc[mask, 'Acquisition Label'] = df.loc[mask, 'Acquisition Label'].apply(simplify_label)
 
     now = datetime.now(pytz.utc)
     today = pd.Timestamp.today()
