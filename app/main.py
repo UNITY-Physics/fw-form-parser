@@ -93,9 +93,12 @@ def convert_markdown_to_html(markdown_text):
 # --- Mappings ---
 
 ANSWER_TO_QC_STATUS = {
-    "0": 'pass',
-    "1": 'unclear',
-    "2": 'fail',
+    0: 'pass',
+    1: 'unclear',
+    2: 'fail',
+    "0" : 'pass',
+    "1" : 'unclear',
+    "2" : 'fail',
 }
 
 QC_STATUS_TO_TAG = {
@@ -120,7 +123,7 @@ QUESTION_TO_ORIENTATION = {
 }
 
 # Protocol name constants
-PROTOCOL_SESSION_BASED     = 'Clinical QC'
+PROTOCOL_SESSION_BASED     = "Clinical QC" # "clinical-reporting QC" #'Clinical QC'
 PROTOCOL_ACQUISITION_BASED = 'QC'
 
 
@@ -128,20 +131,25 @@ PROTOCOL_ACQUISITION_BASED = 'QC'
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def apply_qc_tag(obj, qc_tag: str, context: str) -> None:
+def apply_qc_tag(fw, obj, qc_tag: str, context: str) -> None:
     """Delete the 'read' tag and apply a QC tag to a Flywheel object."""
     try:
-        obj.delete_tag('read')
+        #log.info(f"ID OF OBJ {obj._id} {type(obj)}")
+        obj = fw.get(obj._id)
+        obj = obj.reload()
+        if 'read' in obj.tags:
+            obj.delete_tag('read')
         obj.add_tag(qc_tag)
     except flywheel.ApiException as e:
         log.error(f'Error adding tag to {context}: {e}')
-
 
 def get_nii_file(fw, acquisition):
     """Return the Flywheel file object for the first .nii.gz file in an acquisition."""
     for f in acquisition.files:
         if f.name.endswith('nii.gz'):
-            return fw.get_file(f.file_id)
+            print(f"Found .nii.gz file: {f.name} {f._id} in acquisition {acquisition.label}")
+            return f #fw.files.find_first(f"id={f._id}")
+        
     return None
 
 
@@ -175,11 +183,15 @@ def get_orientation(label: str):
 def tag_acquisition(fw, acquisition, qc_status: str, label_hint: str) -> None:
     """Apply QC tag to an acquisition and its .nii.gz file."""
     qc_tag = QC_STATUS_TO_TAG[qc_status]
-    apply_qc_tag(acquisition, qc_tag, f'acquisition ({label_hint})')
+    apply_qc_tag(fw, acquisition, qc_tag, f'acquisition ({label_hint})')
 
     nii_file = get_nii_file(fw, acquisition)
     if nii_file:
-        apply_qc_tag(nii_file, qc_tag, f'file ({label_hint})')
+        try:
+            nii_file.add_tag(qc_tag)
+            #apply_qc_tag(fw, nii_file, qc_tag, f'file ({label_hint})')
+        except flywheel.ApiException as e:
+            log.error(f'Error adding tag to .nii.gz file in acquisition "{label_hint}": {e}')
     else:
         log.warning(f'No .nii.gz file found in acquisition "{label_hint}"')
 
@@ -215,7 +227,8 @@ def parse_form_responses(task_df) -> dict:
     return responses
 
 
-def get_dicom_series_number(fw, acquisition) :
+
+def get_dicom_series_number(fw, dicom_header) :
     """
     Read the SeriesNumber DICOM tag from the first .dcm (or DICOM zip) file
     attached to an acquisition.
@@ -226,6 +239,9 @@ def get_dicom_series_number(fw, acquisition) :
       3. Read the first member with fw.read_file_zip_member() and parse with pydicom.
       4. Return ds.SeriesNumber as an int, or None on any failure.
     """
+    
+    dicom_header.info.get('SeriesNumber', "0")
+    
     import pydicom
     import io
 
@@ -257,24 +273,37 @@ def get_dicom_series_number(fw, acquisition) :
         return None
 
 
-def find_acquisition_by_pattern(fw, session_acquisitions, pattern: str, series_number: int):
+def _label_matches_tokens(label: str, tokens: list[str]) -> bool:
+    """
+    Return True if ALL tokens are present in the acquisition label (case-insensitive).
+
+    This is more robust than a single-string match because acquisition labels
+    can vary in word order and separator style (e.g. "AXI_T2_Fast", "T2w AXI").
+
+    Example:
+        _label_matches_tokens("T2w_AXI_Fast", ["T2", "AXI"])  → True
+        _label_matches_tokens("T1_AXI",       ["T2", "AXI"])  → False
+    """
+    upper = label.upper()
+    return all(token.upper() in upper for token in tokens)
+
+def find_acquisition_by_pattern(fw, session_acquisitions, tokens: list[str], series_number: int):
     """
     Search a list of Flywheel acquisition objects for one whose label contains
-    `pattern` (case-insensitive).
+    ALL tokens in `tokens` (case-insensitive).
 
-    If `series_number` is given AND multiple acquisitions match the label pattern,
-    disambiguate by reading the SeriesNumber from each acquisition's DICOM file.
+    If `series_number` is given AND multiple acquisitions match, disambiguate
+    by reading the SeriesNumber from each acquisition's DICOM file.
 
     Returns the first matching acquisition, or None.
     """
-    pattern_upper = pattern.upper()
     candidates = [
         acq for acq in session_acquisitions
-        if pattern_upper in acq.label.upper()
+        if _label_matches_tokens(acq.label, tokens)
     ]
 
     if not candidates:
-        log.warning(f'No acquisitions found matching pattern "{pattern}"')
+        log.warning(f'No acquisitions found matching tokens {tokens}')
         return None
 
     # Only one match — no disambiguation needed
@@ -283,11 +312,16 @@ def find_acquisition_by_pattern(fw, session_acquisitions, pattern: str, series_n
 
     # Multiple acquisitions match the label — disambiguate via DICOM SeriesNumber
     log.info(
-        f'Multiple acquisitions match "{pattern}" '
+        f'Multiple acquisitions match {tokens} '
         f'({[a.label for a in candidates]}); disambiguating by SeriesNumber={series_number}'
     )
     for acq in candidates:
-        acq_series = get_dicom_series_number(fw, acq)
+        for file_obj in acq.files: # get the files in the acquisition
+            # Screen file object information & download the desired file
+            if file_obj['type'] == 'dicom':
+                dicom_header = fw._fw.get_acquisition_file_info(acq.id, file_obj.name)
+                acq_series = dicom_header.info.get('SeriesNumber', None)
+                
         if acq_series is not None and acq_series == int(series_number):
             return acq
 
@@ -298,31 +332,39 @@ def find_acquisition_by_pattern(fw, session_acquisitions, pattern: str, series_n
     return candidates[0]
 
 
-def find_repeat_acquisition(fw, session_acquisitions, pattern: str, primary_series_number: int):
+def find_repeat_acquisition(fw, session_acquisitions, tokens: list[str], primary_series_number: int):
     """
-    Among all acquisitions matching `pattern`, return the one whose DICOM
-    SeriesNumber does NOT match `primary_series_number`.
+    Among all acquisitions whose label contains ALL tokens, return the one
+    whose DICOM SeriesNumber does NOT match `primary_series_number`.
 
-    This is used to locate the repeat scan when the primary has already been
-    identified by its series number.
+    This isolates the repeat scan once the primary has been identified by its
+    series number.
     """
-    pattern_upper = pattern.upper()
     candidates = [
         acq for acq in session_acquisitions
-        if pattern_upper in acq.label.upper()
+        if _label_matches_tokens(acq.label, tokens)
     ]
 
     if len(candidates) <= 1:
-        log.warning(f'Expected multiple acquisitions for repeat lookup of "{pattern}", found {len(candidates)}.')
+        log.warning(
+            f'Expected multiple acquisitions for repeat lookup of {tokens}, '
+            f'found {len(candidates)}.'
+        )
         return None
 
     for acq in candidates:
-        acq_series = get_dicom_series_number(fw, acq)
-        if acq_series is not None and acq_series != int(primary_series_number):
+        for file_obj in acq.files: # get the files in the acquisition
+            # Screen file object information & download the desired file
+            if file_obj['type'] == 'dicom':
+                dicom_header = fw._fw.get_acquisition_file_info(acq.id, file_obj.name)
+                acq_series = dicom_header.info.get('SeriesNumber', None)
+                
+        if acq_series is not None and int(acq_series) != int(primary_series_number):
             return acq
 
-    log.warning(f'Could not identify repeat acquisition for pattern "{pattern}".')
+    log.warning(f'Could not identify repeat acquisition for tokens {tokens}.')
     return None
+
 
 
 # ---------------------------------------------------------------------------
@@ -337,21 +379,29 @@ ORIENTATION_CONFIG = {
         'repeat_key':         'repeat_t2_axi',
         'repeat_quality_key': 'quality_t2_axi_repeat',
         'series_key':         'reported_series_number_t2_axi',
-        'label_pattern':      'T2 AXI',
+        'label_tokens': ['T2', 'AXI']  # matches if label contains BOTH "T2" AND "AXI", in any order/format
     },
     'cor': {
         'quality_key':        'quality_t2_cor',
         'repeat_key':         'repeat_t2_cor',
         'repeat_quality_key': None,
         'series_key':         None,
-        'label_pattern':      'T2 COR',
+        'label_tokens': ['T2', 'COR']  # matches if label contains BOTH "T2" AND "AXI", in any order/format
     },
     'sag': {
         'quality_key':        'quality_t2_sag',
         'repeat_key':         'repeat_t2_sag',
         'repeat_quality_key': None,
         'series_key':         None,
-        'label_pattern':      'T2 SAG',
+        'label_tokens': ['T2', 'SAG']  # matches if label contains BOTH "T2" AND "AXI", in any order/format
+    },
+    
+    't1_axi': {
+        'quality_key':        'quality_t1_axi',
+        'repeat_key':         'repeat_t1_axi',
+        'repeat_quality_key': None,
+        'series_key':         None,
+        'label_tokens':       ['T1', 'AXI'],
     },
 }
 
@@ -378,7 +428,7 @@ def _process_task_session_based(task_df, fw):
     responses = parse_form_responses(task_df)
 
     try:
-        session              = fw.get_session(session_id)
+        session              = fw.get(session_id)
         session_acquisitions = session.acquisitions()
     except flywheel.ApiException as e:
         log.error(f'Error fetching session {session_id}: {e}')
@@ -403,13 +453,13 @@ def _process_task_session_based(task_df, fw):
 
         # --- Tag the primary acquisition ---
         primary_acq = find_acquisition_by_pattern(
-            fw, session_acquisitions, cfg['label_pattern'], series_number
+            fw, session_acquisitions, cfg['label_tokens'], series_number
         )
         if primary_acq:
             log.info(f"[{orientation}] Primary acquisition: {primary_acq.label} → {qc_status}")
             tag_acquisition(fw, primary_acq, qc_status, primary_acq.label)
         else:
-            log.warning(f"[{orientation}] No primary acquisition found for pattern '{cfg['label_pattern']}'")
+            log.warning(f"[{orientation}] No primary acquisition found for tokens '{cfg['label_tokens']}'")
 
         # --- Tag the repeat acquisition (if present) ---
         if has_repeat and cfg['repeat_quality_key']:
@@ -421,13 +471,13 @@ def _process_task_session_based(task_df, fw):
                 # The repeat is the *other* T2 AXI — the one whose SeriesNumber
                 # does NOT match the primary's reported series number.
                 repeat_acq = find_repeat_acquisition(
-                    fw, session_acquisitions, cfg['label_pattern'], series_number
+                    fw, session_acquisitions, cfg['label_tokens'], series_number
                 )
                 if repeat_acq:
-                    log.info(f"[{orientation}] Repeat acquisition: {repeat_acq.label} → {repeat_status}")
+                    log.info(f"[{session_label} | {subject_label}] [{orientation}] Repeat acquisition: {repeat_acq.label} → {repeat_status}")
                     tag_acquisition(fw, repeat_acq, repeat_status, repeat_acq.label)
                 else:
-                    log.warning(f"[{orientation}] No repeat acquisition found for pattern '{cfg['label_pattern']}'")
+                    log.warning(f"[{session_label} | {subject_label}] [{orientation}] No repeat acquisition found for token '{cfg['label_tokens']}'")
 
     # --- Session-level tag ---
     session_qc = resolve_session_qc(
@@ -465,7 +515,7 @@ def _process_task_acquisition_based(task_df, fw):
 
         acquisition_id = row['acquisition.id']
         try:
-            acquisition = fw.get_acquisition(acquisition_id)
+            acquisition = fw.get(acquisition_id)
         except flywheel.ApiException as e:
             log.error(f'Error getting acquisition {acquisition_id}: {e}')
             continue
@@ -497,7 +547,7 @@ def _process_task_acquisition_based(task_df, fw):
         session_label = last_row['Session Label']
         log.info(f"Session QC → {session_tag} for subject {subject_label}")
         try:
-            session = fw.get_session(last_row['session.id'])
+            session = fw.get(last_row['session.id'])
             for tag in session.tags:
                 log.info(f"Removing tag {tag} from session {session.id}")
                 session.delete_tag(tag)

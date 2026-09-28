@@ -1,6 +1,9 @@
 # Changelog
 
 28/09/2026:
+"version": "0.1.40"
+Fixed bug not tagging nifti file, and included str and int in answer mapping.
+
 "version": "0.1.39"
 This version was adapted to handle Clinical QC (session-based). Tweaks were also made to disable automatic PDF generation, and removing session QC tags to avoid situations where we have contradicting session QC statuses.
 
