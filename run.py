@@ -6,9 +6,7 @@ import sys
 import os
 from flywheel_gear_toolkit import GearToolkitContext
 from app.parser import parse_config
-from app.main import run_tagger
-from app.main import run_csv_parser
-from app.main import generate_full_qc_report, create_cover_page
+from app.main_v2 import run_tagger, run_csv_parser, generate_full_qc_report, create_cover_page
 
 # Set up logging
 log = logging.getLogger(__name__)
@@ -23,7 +21,7 @@ def main(context: GearToolkitContext) -> None:
         # Run CSV parser
         e_code, output = run_csv_parser(context, api_key)
         
-
+        print("CSV parser completed with exit code:", e_code)
         # Run the tagger function
         qc_done = run_tagger(context, api_key)
         #out_dir = '/flywheel/v0/output'

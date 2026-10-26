@@ -36,6 +36,10 @@ import seaborn as sns
 from matplotlib.backends.backend_pdf import PdfPages
 
 from utils.format import beautify_report, scale_image, simplify_label, generate_on_page, generate_end_page
+try:
+    from app.session_level import flatten_session_level, write_outputs as write_session_outputs
+except ImportError:  # running outside the gear package layout
+    from session_level import flatten_session_level, write_outputs as write_session_outputs
 
 """
 Tag files for visual QC reader tasks in Flywheel
@@ -228,49 +232,49 @@ def parse_form_responses(task_df) -> dict:
 
 
 
-def get_dicom_series_number(fw, dicom_header) :
-    """
-    Read the SeriesNumber DICOM tag from the first .dcm (or DICOM zip) file
-    attached to an acquisition.
+# def get_dicom_series_number(fw, dicom_header) :
+#     """
+#     Read the SeriesNumber DICOM tag from the first .dcm (or DICOM zip) file
+#     attached to an acquisition.
 
-    Strategy:
-      1. Find the first file whose type is 'dicom' (or name ends with '.dcm').
-      2. Call fw.get_file_zip_info() to list zip members.
-      3. Read the first member with fw.read_file_zip_member() and parse with pydicom.
-      4. Return ds.SeriesNumber as an int, or None on any failure.
-    """
+#     Strategy:
+#       1. Find the first file whose type is 'dicom' (or name ends with '.dcm').
+#       2. Call fw.get_file_zip_info() to list zip members.
+#       3. Read the first member with fw.read_file_zip_member() and parse with pydicom.
+#       4. Return ds.SeriesNumber as an int, or None on any failure.
+#     """
     
-    dicom_header.info.get('SeriesNumber', "0")
+#     dicom_header.info.get('SeriesNumber', "0")
     
-    import pydicom
-    import io
+#     import pydicom
+#     import io
 
-    # Locate the DICOM file on the acquisition
-    dicom_file = None
-    for f in acquisition.files:
-        if f.type == 'dicom' or f.name.lower().endswith('.dcm'):
-            dicom_file = f
-            break
+#     # Locate the DICOM file on the acquisition
+#     dicom_file = None
+#     for f in acquisition.files:
+#         if f.type == 'dicom' or f.name.lower().endswith('.dcm'):
+#             dicom_file = f
+#             break
 
-    if dicom_file is None:
-        log.warning(f'No DICOM file found on acquisition "{acquisition.label}"')
-        return None
+#     if dicom_file is None:
+#         log.warning(f'No DICOM file found on acquisition "{acquisition.label}"')
+#         return None
 
-    try:
-        zip_info = fw.get_file_zip_info(dicom_file.file_id)
-        if not zip_info.members:
-            log.warning(f'DICOM zip for "{acquisition.label}" has no members')
-            return None
+#     try:
+#         zip_info = fw.get_file_zip_info(dicom_file.file_id)
+#         if not zip_info.members:
+#             log.warning(f'DICOM zip for "{acquisition.label}" has no members')
+#             return None
 
-        # Read just the first slice — enough to get SeriesNumber
-        first_member = zip_info.members[0].path
-        raw = fw.read_file_zip_member(dicom_file.file_id, first_member)
-        ds = pydicom.dcmread(io.BytesIO(raw), stop_before_pixels=True)
-        return int(ds.SeriesNumber)
+#         # Read just the first slice — enough to get SeriesNumber
+#         first_member = zip_info.members[0].path
+#         raw = fw.read_file_zip_member(dicom_file.file_id, first_member)
+#         ds = pydicom.dcmread(io.BytesIO(raw), stop_before_pixels=True)
+#         return int(ds.SeriesNumber)
 
-    except Exception as e:
-        log.error(f'Error reading DICOM SeriesNumber for "{acquisition.label}": {e}')
-        return None
+#     except Exception as e:
+#         log.error(f'Error reading DICOM SeriesNumber for "{acquisition.label}": {e}')
+#         return None
 
 
 def _label_matches_tokens(label: str, tokens: list[str]) -> bool:
@@ -725,19 +729,22 @@ def run_csv_parser(context, api_key):
     project_container = context.client.get(dest_proj_id)
     project = project_container.reload()
     analyses = project.analyses
-
+    
+    
     # Filter the analyses by the gear name
     gear_to_find = gear.strip()  # Assuming 'gear' is the gear name you're looking for
     filtered_gear_runs =[]
 
     for run in analyses:
-        #print(run)
         try:
-            #take into account analysis containers not just gears
-            if run is not None and run.get('gear_info') is None and gear in run.label:
-                 filtered_gear_runs.append(run)
-            if run is not None and run.get('gear_info', {}).get('name', '').strip().casefold() == gear_to_find.casefold() and run.reload().job.get('state')=="complete":
+            if run.get('gear_info', {}).get('name', '').strip() == gear_to_find:
                 filtered_gear_runs.append(run)
+                
+            # #take into account analysis containers not just gears
+            # if run is not None and run.get('gear_info') is None and gear in run.label:
+            #      filtered_gear_runs.append(run)
+            # if run is not None and run.get('gear_info', {}).get('name', '').strip().casefold() == gear_to_find.casefold() and run.reload().job.get('state')=="complete":
+            #     filtered_gear_runs.append(run)
         except Exception as e:
             log.info(f'Exception caught {e}')
 
@@ -748,6 +755,7 @@ def run_csv_parser(context, api_key):
         #print(latest_gear_run)
 
     if latest_gear_run is not None:
+        latest_gear_run = latest_gear_run.reload()
         file_object = latest_gear_run.files
         log.info(f"File object: {file_object[0].name}")
 
@@ -792,6 +800,29 @@ def run_csv_parser(context, api_key):
         
     # Step 3: Save the filtered DataFrame to a new CSV (optional)
     df.to_csv('/flywheel/v0/work/filtered_file.csv', index=False)
+
+    # --- Session-level ("Clinical QC") form responses: flatten separately -------------------
+    # These rows have no acquisition label, so the file-level pivot below cannot handle them.
+    session_df = None
+    if 'Protocol Name' in raw_df.columns:
+        session_mask = raw_df['Protocol Name'] == PROTOCOL_SESSION_BASED
+        if session_mask.any():
+            log.info(f"Flattening {raw_df.loc[session_mask, 'Session Label'].nunique()} session-level QC form responses.")
+            session_df, session_issues = flatten_session_level(raw_df.loc[session_mask])
+            # The clinical free-text answers make pandas read the whole 'Answer' column as text; the
+            # file-level relabelling below expects numbers (0/1/2), so convert the remaining rows back.
+            df = df.loc[~session_mask].copy()
+            df['Answer'] = pd.to_numeric(df['Answer'], errors='coerce')
+            if not session_issues.empty:
+                issues_path = os.path.join(context.output_dir, 'parse_issues.csv')
+                session_issues.to_csv(issues_path, index=False)
+                log.warning(f"{len(session_issues)} parsing issues written to {issues_path}")
+            if df.empty:  # only session-level data in this project
+                if session_df.empty:
+                    return (1, "No data to export. The session-level DataFrame is empty.")
+                out_path, _ = write_session_outputs(session_df, None, context.output_dir)
+                log.info(f'Parsed QC data saved to: {out_path}')
+                return (0, out_path)
 
         
     # Apply the function to simplify acquisition labels using .loc
@@ -904,142 +935,23 @@ def run_csv_parser(context, api_key):
     now = datetime.now(pytz.utc)
     formatted_date = now.strftime("%Y-%m-%d_%H-%M-%S")
 
+    if session_df is not None and not session_df.empty:
+        merged_df = pd.concat([merged_df, session_df], ignore_index=True)
+
     # Step 9: Export the results to a CSV file
     output_filename = f"parsed_qc_annotations_{formatted_date}.csv"
-    print("CONTEXT OUTPUT DIR", context.output_dir)
+    
     if not merged_df.empty:
         log.info("Exporting annotations to CSV file.")
         #output_filename = f"parsed_qc_annotations_{formatted_date}.csv"
         merged_df.to_csv(context.output_dir / output_filename, index=False)
-    log.info(f'Parsed QC data saved to: {output_filename}')
-    return (0, os.path.join(context.output_dir,output_filename))
+        log.info(f'Parsed QC data saved to: {context.output_dir / output_filename}')
+        return (0, os.path.join(context.output_dir,output_filename))
+
+    return (1, "No data to export. The merged DataFrame is empty.")
 
 
-# def qc_completeness(context, api_key):
 
-#     fwclient = FWClient(
-#         api_key=api_key,
-#         timeout=100,
-#     )
-#     fw = flywheel.Client(api_key=api_key)
-
-#     protocol_label = 'QC'
-#     destination_container = context.client.get_analysis(context.destination["id"])
-
-#     dest_proj_id = destination_container.parents["project"]
-
-#     project_container = context.client.get(dest_proj_id)
-#     project_label = project_container.label
-
-#     project  = fw.projects.find_one(f'label={project_label}')
-#     project = project.reload()
-
-
-    # protocol_filter = f"parents.project={dest_proj_id}"
-    # if protocol_label:
-    #     protocol_filter += f",label={protocol_label}"
-
-    # protocol = fwclient.get(
-    #     f"/api/read_task_protocols?filter=parents.project={dest_proj_id},label={protocol_label}"
-    # ).get("results")[0]
-
-    # my_filter = f"protocol_id={protocol._id},status=Complete"
-    # reader_tasks_complete = fwclient.get(f"/api/readertasks/project/{dest_proj_id}?filter={my_filter}").to_flat().get("results")
-    
-    # my_filter = f"protocol_id={protocol._id},status=Todo"
-    # reader_tasks_todo = fwclient.get(f"/api/readertasks/project/{dest_proj_id}?filter={my_filter}").to_flat().get("results")
-    # print(len(reader_tasks_todo))
-
-    # my_filter = f"protocol_id={protocol._id},status=In_progress"
-    # reader_tasks_inprogress = fwclient.get(f"/api/readertasks/project/{dest_proj_id}?filter={my_filter}").to_flat().get("results")
-    # print(len(reader_tasks_inprogress))
-        
-    #Get files that have not been QC'ed
-    #These should be the files that still have the "read" tag
-
-    
-    # read_tagged_ids = set()
-    # for session in project.sessions():
-    #     session = session.reload()
-    #     for acquisition in session.acquisitions():
-    #         nifti_files_read = [f.id for f in acquisition.files if f.type=="nifti" and "read" in f.tags]
-    #         read_tagged_ids.update(nifti_files_read)
-    #         #n_read = n_read + len(nifti_files_read)
-
-    # # Collect counts
-    # n_complete = len(reader_tasks_complete)
-    # n_todo = len(reader_tasks_todo)
-    # n_inprogress = len(reader_tasks_inprogress)
-    
-    # task_file_ids = set()
-    # for task in (reader_tasks_complete + reader_tasks_todo + reader_tasks_inprogress):
-    #     if task.parent_info.file:
-    #         task_file_ids.add(task.parent_info.file.id.file_id)
-
-    # orphaned_read = read_tagged_ids - task_file_ids
-    # n_read_orphaned = len(orphaned_read)  
-
-    # # Create table dataframe
-    # QC_stats = pd.DataFrame({
-    #     "File Count": [n_complete, n_todo, n_inprogress, n_read_orphaned]
-    # }, index=["Complete", "Todo", "In Progress", "Not QC-Assigned"])
-
-
-    # ##### QC Completeness TABLE ####
-    # fig= plt.figure(figsize=(6, 12)) 
-    # ax = fig.add_axes([0.05, 0.2, 0.9, 0.6])
-
-    # # Add Title
-    # #plt.text(0.5, 0.95, 'Site Data Tracking', fontsize=14, ha='center', transform=fig.transFigure)
-
-    # # Turn off axes
-    # ax.axis('tight')
-    # ax.axis('off')
-
-    # table = ax.table(
-    #         cellText=QC_stats.reset_index().values.tolist(),
-    #         colLabels=["Status", "File Count"],
-    #         cellLoc='center',
-    #         loc='center'
-    #     )
-
-
-    # styles = getSampleStyleSheet()
-    # description_style = styles["Normal"]
-    # description_style.wordWrap = "CJK"  # Enables text wrapping
-
-
-    # # Adjust font size and scale
-    # table.auto_set_font_size(False)
-    # table.set_fontsize(12)
-    # table.scale(1.5, 1.5)  # Experiment with values for width and height scaling
-
-    # fig.set_size_inches(10, len(QC_stats.columns) * 0.5)
-
-
-    # ## Add some styling
-    # for (row, col), cell in table.get_celld().items():
-    #     cell.set_height(0.9)
-    #     cell.set_width(0.4)
-
-    #     # if row == 0:
-    #     #     cell.set_facecolor('#40466e')
-    #     #     cell.set_text_props(color='white', weight='bold')  # Skip header if you're adding one manually later
-
-    #     if col == 0:
-    #         cell.set_facecolor('#40466e')  # Blue
-    #         cell.set_text_props(color='white', weight='bold')
-    #     else:
-    #         cell.set_facecolor('#f0f0f0')  # Light gray
-
-
-    # # Adjust layout to ensure no overlap
-    # plt.subplots_adjust(top=0.85, bottom=0.8)  # Adjust to fit title and text properly
-    # table_path = os.path.join("QC_summary.png")
-    # plt.savefig(table_path,dpi=300, bbox_inches="tight")
-
-    # print(protocol._id)
-    # print(f"{protocol.get('label')}: {protocol.get('description')}")
 
     #return table_path
 
@@ -2363,6 +2275,3 @@ def generate_full_qc_report(context, cover, api_key, input, cde_dict,qc_done):
         log.error(e)
 
     return 0 #all is vell
-
-
-
