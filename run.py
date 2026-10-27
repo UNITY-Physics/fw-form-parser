@@ -6,7 +6,7 @@ import sys
 import os
 from flywheel_gear_toolkit import GearToolkitContext
 from app.parser import parse_config
-from app.main_v2 import run_tagger, run_csv_parser, generate_full_qc_report, create_cover_page
+from app.main import run_tagger, run_csv_parser
 
 # Set up logging
 log = logging.getLogger(__name__)
@@ -20,18 +20,10 @@ def main(context: GearToolkitContext) -> None:
 
         # Run CSV parser
         e_code, output = run_csv_parser(context, api_key)
-        
+
         print("CSV parser completed with exit code:", e_code)
         # Run the tagger function
         qc_done = run_tagger(context, api_key)
-        #out_dir = '/flywheel/v0/output'
-        work_dir = '/flywheel/v0/work'
-        # Run the pdf report function
-        #qc_done=1
-        if qc_report:
-            cover = create_cover_page (context, api_key, work_dir)
-            e_code = generate_full_qc_report(context, cover, api_key, output, cde_dict, qc_done)
-
 
     except (TimeoutError, requests.exceptions.ConnectionError) as exc:
         log.error("Timeout error. Try increasing the read_timeout config parameter.")
